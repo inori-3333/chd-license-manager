@@ -75,13 +75,27 @@ export function applyImport(db: DB, rows: RawRow[], filename: string, actorId: s
         : undefined
       const orgStd = orgResolved
         ? { id: orgResolved.id, auto: true, reason: '权威组织编码一致' }
-        : resolveStandardId('org', orgName, next, null)
+        : orgName
+          ? resolveStandardId('org', orgName, next, null)
+          : { id: null as string | null, auto: false, reason: '组织为空' }
+
+      if (!orgStd.id && !orgName && !orgCode) {
+        errors.push({
+          row: row.row,
+          sheet: row.sheet,
+          field: '组织名称',
+          message: '组织名称或编码为空，无法确定归属，不得猜测',
+          raw: row.values,
+        })
+        continue
+      }
+
       const jobStd = resolveStandardId('job', job, next, orgStd.id)
 
-      if (!orgStd.id) ensurePendingMapping(next, 'org', orgName, orgStd.id)
+      if (!orgStd.id && orgName) ensurePendingMapping(next, 'org', orgName, null)
       if (!jobStd.id) ensurePendingMapping(next, 'job', job, orgStd.id)
 
-      const orgId = orgStd.id ?? next.orgs[0].id
+      const orgId = orgStd.id ?? ''
       const assignment: Assignment = {
         id: nid('asg'),
         personId: person.id,

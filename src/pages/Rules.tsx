@@ -12,16 +12,22 @@ import {
   useDb,
 } from '../store'
 import { CERT_CAT, RULE_STATUS, RULE_TYPE } from '../format'
-import { explainCondition } from '../engine/eval'
-import type { Condition, Rule, SimulationReport } from '../types'
+import { explainCondition, isGroup } from '../engine/eval'
+import type { Condition, ConditionGroup, Rule, SimulationReport } from '../types'
 
 const FIELDS: Array<{ id: Condition['field']; label: string }> = [
   { id: 'job_category', label: '岗位类别' },
   { id: 'standard_job_id', label: '标准岗位' },
   { id: 'work_scope', label: '作业范围' },
+  { id: 'duty_tag', label: '职责标签' },
   { id: 'major', label: '专业' },
+  { id: 'job_tag', label: '岗位标签' },
   { id: 'is_production', label: '生产岗位' },
+  { id: 'org_id', label: '组织' },
   { id: 'org_type', label: '组织类型' },
+  { id: 'person_status', label: '人员状态' },
+  { id: 'assignment_start', label: '任职开始' },
+  { id: 'work_scope_start', label: '作业开始' },
 ]
 
 export function Rules() {
@@ -176,8 +182,31 @@ function RuleEditor({
 }) {
   const db = useDb()
   const locked = rule.status === 'active' || rule.status === 'expired' || rule.status === 'pending_effective'
-  const simpleConds = rule.condition.conditions.filter((c): c is Condition => 'field' in c)
   const c = detectSafe(rule)
+
+  function setGroup(next: ConditionGroup) {
+    onChange({ ...rule, condition: next })
+  }
+
+  function patchLeaf(i: number, patch: Partial<Condition>) {
+    const conditions = rule.condition.conditions.map((item, idx) => {
+      if (idx !== i || isGroup(item)) return item
+      return { ...item, ...patch }
+    })
+    setGroup({ ...rule.condition, conditions })
+  }
+
+  function removeAt(i: number) {
+    if (rule.condition.conditions.length <= 1) return
+    setGroup({ ...rule.condition, conditions: rule.condition.conditions.filter((_, idx) => idx !== i) })
+  }
+
+  function addLeaf() {
+    setGroup({
+      ...rule.condition,
+      conditions: [...rule.condition.conditions, { field: 'work_scope', operator: 'CONTAINS', value: '' }],
+    })
+  }
 
   return (
     <div className="space-y-3 text-sm">
@@ -221,53 +250,70 @@ function RuleEditor({
         </L>
       </div>
       <div>
-        <div className="mb-1 text-slate-500">适用条件（白名单字段，不执行脚本）</div>
-        {simpleConds.map((cnd, i) => (
-          <div key={i} className="mb-2 flex gap-2">
-            <select
-              className="select"
-              disabled={locked}
-              value={cnd.field}
-              onChange={(e) => {
-                const next = [...simpleConds]
-                next[i] = { ...cnd, field: e.target.value as Condition['field'] }
-                onChange({ ...rule, condition: { logic: 'AND', conditions: next } })
-              }}
-            >
-              {FIELDS.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.label}
-                </option>
-              ))}
-            </select>
-            <select
-              className="select"
-              disabled={locked}
-              value={cnd.operator}
-              onChange={(e) => {
-                const next = [...simpleConds]
-                next[i] = { ...cnd, operator: e.target.value as Condition['operator'] }
-                onChange({ ...rule, condition: { logic: 'AND', conditions: next } })
-              }}
-            >
-              <option value="IN">属于</option>
-              <option value="NOT_IN">不属于</option>
-              <option value="EQ">等于</option>
-              <option value="CONTAINS">包含</option>
-            </select>
-            <input
-              className="input flex-1"
-              disabled={locked}
-              value={Array.isArray(cnd.value) ? cnd.value.join(',') : cnd.value}
-              onChange={(e) => {
-                const next = [...simpleConds]
-                const v = e.target.value
-                next[i] = { ...cnd, value: v.includes(',') ? v.split(',').map((s) => s.trim()) : v }
-                onChange({ ...rule, condition: { logic: 'AND', conditions: next } })
-              }}
-            />
-          </div>
-        ))}
+        <div className="mb-1 flex items-center gap-2 text-slate-500">
+          适用条件（白名单字段，不执行脚本）
+          <select
+            className="select"
+            disabled={locked}
+            value={rule.condition.logic}
+            onChange={(e) => setGroup({ ...rule.condition, logic: e.target.value as ConditionGroup['logic'] })}
+          >
+            <option value="AND">全部满足（且）</option>
+            <option value="OR">任一满足（或）</option>
+          </select>
+        </div>
+        {rule.condition.conditions.map((cnd, i) =>
+          isGroup(cnd) ? (
+            <div key={i} className="mb-2 rounded bg-slate-50 px-2 py-1 text-xs text-slate-600">
+              嵌套组（只读）：{explainCondition(cnd)}
+            </div>
+          ) : (
+            <div key={i} className="mb-2 flex gap-2">
+              <select
+                className="select"
+                disabled={locked}
+                value={cnd.field}
+                onChange={(e) => patchLeaf(i, { field: e.target.value as Condition['field'] })}
+              >
+                {FIELDS.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="select"
+                disabled={locked}
+                value={cnd.operator}
+                onChange={(e) => patchLeaf(i, { operator: e.target.value as Condition['operator'] })}
+              >
+                <option value="IN">属于</option>
+                <option value="NOT_IN">不属于</option>
+                <option value="EQ">等于</option>
+                <option value="CONTAINS">包含</option>
+                <option value="BEFORE">早于</option>
+                <option value="AFTER">晚于</option>
+              </select>
+              <input
+                className="input flex-1"
+                disabled={locked}
+                value={Array.isArray(cnd.value) ? cnd.value.join(',') : cnd.value}
+                onChange={(e) => {
+                  const v = e.target.value
+                  patchLeaf(i, { value: v.includes(',') ? v.split(',').map((s) => s.trim()) : v })
+                }}
+              />
+              {!locked ? (
+                <Button disabled={rule.condition.conditions.length <= 1} onClick={() => removeAt(i)}>
+                  删除
+                </Button>
+              ) : null}
+            </div>
+          ),
+        )}
+        {!locked ? (
+          <Button onClick={addLeaf}>添加条件</Button>
+        ) : null}
       </div>
       <div>
         <div className="mb-1 text-slate-500">证书要求</div>
@@ -300,8 +346,36 @@ function RuleEditor({
                 onChange({ ...rule, requirement: { ...rule.requirement, items } })
               }}
             />
+            {!locked ? (
+              <Button
+                disabled={rule.requirement.items.length <= 1}
+                onClick={() =>
+                  onChange({
+                    ...rule,
+                    requirement: { ...rule.requirement, items: rule.requirement.items.filter((_, idx) => idx !== i) },
+                  })
+                }
+              >
+                删除
+              </Button>
+            ) : null}
           </div>
         ))}
+        {!locked ? (
+          <Button
+            onClick={() =>
+              onChange({
+                ...rule,
+                requirement: {
+                  ...rule.requirement,
+                  items: [...rule.requirement.items, { certificateId: db.certificates[0]?.id }],
+                },
+              })
+            }
+          >
+            添加证书
+          </Button>
+        ) : null}
       </div>
       {rule.type === 'group_ratio' ? (
         <div>

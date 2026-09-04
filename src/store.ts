@@ -482,6 +482,19 @@ export function visibleOrgIds(d = db): Set<string> | null {
   return descendantIds(d, u.orgScopeId)
 }
 
+export function issueInScope(issue: Issue, d = db): boolean {
+  const scope = visibleOrgIds(d)
+  if (!scope) return true
+  if (issue.orgId && scope.has(issue.orgId)) return true
+  if (issue.personId) {
+    const asg =
+      d.assignments.find((a) => a.personId === issue.personId && a.kind === 'primary') ??
+      d.assignments.find((a) => a.personId === issue.personId)
+    return asg ? scope.has(asg.orgId) : false
+  }
+  return false
+}
+
 export function newDraftRule(): Rule {
   const u = currentUser()
   return {

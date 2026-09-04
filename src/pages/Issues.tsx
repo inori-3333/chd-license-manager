@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Badge, Button, Card, Modal, Pager, PAGE_SIZE, issueTone } from '../components/ui'
-import { can, startRemediation, useDb, visibleOrgIds } from '../store'
+import { can, issueInScope, startRemediation, useDb } from '../store'
 import { ISSUE_CLASS, ISSUE_STATUS } from '../format'
 import { orgPath } from '../engine/org'
 import type { Issue, IssueClass } from '../types'
@@ -15,27 +15,28 @@ const TABS: Array<{ id: IssueClass | 'all'; label: string }> = [
 
 export function Issues() {
   const db = useDb()
-  const scope = visibleOrgIds(db)
   const [tab, setTab] = useState<IssueClass | 'all'>('all')
   const [q, setQ] = useState('')
   const [page, setPage] = useState(1)
   const [sel, setSel] = useState<Issue | null>(null)
 
+  const scoped = useMemo(() => db.issues.filter((i) => issueInScope(i, db)), [db])
+
   const rows = useMemo(() => {
-    return db.issues.filter((i) => {
-      if (i.status === 'closed') return tab === 'all'
-      if (scope && i.orgId && !scope.has(i.orgId)) return false
+    return scoped.filter((i) => {
+      if (i.status === 'closed' && tab !== 'all') return false
       if (tab !== 'all' && i.class !== tab) return false
       if (q && !`${i.title}${i.code}${i.rationale}`.includes(q)) return false
       return true
     })
-  }, [db.issues, scope, tab, q])
+  }, [scoped, tab, q])
 
+  const openScoped = scoped.filter((i) => i.status !== 'closed')
   const counts = {
-    all: db.issues.filter((i) => i.status !== 'closed').length,
-    data_quality: db.issues.filter((i) => i.class === 'data_quality' && i.status !== 'closed').length,
-    risk: db.issues.filter((i) => i.class === 'risk' && i.status !== 'closed').length,
-    compliance: db.issues.filter((i) => i.class === 'compliance' && i.status !== 'closed').length,
+    all: openScoped.length,
+    data_quality: openScoped.filter((i) => i.class === 'data_quality').length,
+    risk: openScoped.filter((i) => i.class === 'risk').length,
+    compliance: openScoped.filter((i) => i.class === 'compliance').length,
   }
 
   return (

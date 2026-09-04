@@ -18,8 +18,8 @@ import type {
   UnitStats,
   WarningLevel,
 } from '../types'
-import { daysBetween, inRange } from './dates'
-import { evalPersonApplicability, explainCondition } from './eval'
+import { addDays, daysBetween, inRange } from './dates'
+import { collectFieldValues, evalPersonApplicability, explainCondition } from './eval'
 import { companies, companyOf, descendantIds, orgById, orgPath } from './org'
 
 export function assignmentsAt(db: DB, personId: string, asOf: string): Assignment[] {
@@ -58,33 +58,69 @@ export function isHoldingEffective(h: CertHolding, asOf: string, db: DB): boolea
   return true
 }
 
+function levelFromNodes(daysLeft: number, nodes: number[], enabled: boolean): WarningLevel | undefined {
+  if (!enabled || daysLeft < 0) return undefined
+  const sorted = [...nodes].sort((a, b) => a - b)
+  if (sorted.includes(7) && daysLeft <= 7) return 'urgent_7'
+  if (sorted.some((n) => n <= 30) && daysLeft <= 30) return 'warn_30'
+  if (sorted.some((n) => n <= 90) && daysLeft <= 90) return 'warn_90'
+  if (sorted.some((n) => n <= 180) && daysLeft <= 180) return 'hint_180'
+  return undefined
+}
+
+const EXPIRY_LABEL: Record<string, string> = {
+  hint_180: '一级提示（180天）',
+  warn_90: '二级预警（90天）',
+  warn_30: '三级预警（30天）',
+  urgent_7: '紧急预警（7天）',
+  expired: '已过期',
+}
+
+const REVIEW_LABEL: Record<string, string> = {
+  hint_180: '复审一级提示（180天）',
+  warn_90: '复审二级预警（90天）',
+  warn_30: '复审三级预警（30天）',
+  urgent_7: '复审紧急预警（7天）',
+  expired: '复审已逾期',
+}
+
 export function holdingProblems(
   h: CertHolding,
   asOf: string,
   db: DB,
-): { expired: boolean; reviewOverdue: boolean; daysLeft?: number; warning?: WarningLevel } {
+): {
+  expired: boolean
+  reviewOverdue: boolean
+  daysLeft?: number
+  warning?: WarningLevel
+  reviewDaysLeft?: number
+  reviewWarning?: WarningLevel
+} {
   const cert = h.standardCertId ? db.certificates.find((c) => c.id === h.standardCertId) : undefined
   let expired = false
   let reviewOverdue = false
   let daysLeft: number | undefined
   let warning: WarningLevel | undefined
+  let reviewDaysLeft: number | undefined
+  let reviewWarning: WarningLevel | undefined
   if (cert?.hasExpiry && h.validTo) {
     daysLeft = daysBetween(asOf, h.validTo)
     if (daysLeft < 0) {
       expired = true
       warning = 'expired'
-    } else if (cert.warning.expiryEnabled) {
-      const nodes = [...cert.warning.expiryNodes].sort((a, b) => a - b)
-      if (nodes.includes(7) && daysLeft <= 7) warning = 'urgent_7'
-      else if (nodes.some((n) => n <= 30) && daysLeft <= 30) warning = 'warn_30'
-      else if (nodes.some((n) => n <= 90) && daysLeft <= 90) warning = 'warn_90'
-      else if (nodes.some((n) => n <= 180) && daysLeft <= 180) warning = 'hint_180'
+    } else {
+      warning = levelFromNodes(daysLeft, cert.warning.expiryNodes, cert.warning.expiryEnabled)
     }
   }
-  if (cert?.needsReview && h.reviewDate && h.reviewDate < asOf) {
-    reviewOverdue = true
+  if (cert?.needsReview && h.reviewDate) {
+    reviewDaysLeft = daysBetween(asOf, h.reviewDate)
+    if (reviewDaysLeft < 0) {
+      reviewOverdue = true
+    } else {
+      reviewWarning = levelFromNodes(reviewDaysLeft, cert.warning.reviewNodes, cert.warning.reviewEnabled)
+    }
   }
-  return { expired, reviewOverdue, daysLeft, warning }
+  return { expired, reviewOverdue, daysLeft, warning, reviewDaysLeft, reviewWarning }
 }
 
 function matchHolding(
@@ -166,17 +202,33 @@ function transitionOverlay(
     const app = evalPersonApplicability(rule.condition, db, person, assignments, scopes, asOf)
     if (app.result !== 'true') continue
     const days = rule.transitionDays ?? 90
-    const starts: string[] = []
-    for (const a of assignments) starts.push(a.startDate)
-    for (const s of scopes.filter((x) => x.confirmed)) starts.push(s.startDate)
-    if (starts.length === 0) continue
-    const latestRelevant = starts.sort()[starts.length - 1]
-    const assignmentForCert = assignments
-      .slice()
-      .sort((a, b) => a.startDate.localeCompare(b.startDate))
-    const start = assignmentForCert[assignmentForCert.length - 1]?.startDate ?? latestRelevant
-    const deadlineMs = Date.parse(start + 'T00:00:00') + days * 86400000
-    const deadline = new Date(deadlineMs).toISOString().slice(0, 10)
+    const qualifyingStarts = app.perAssignment
+      .filter((p) => p.result === 'true')
+      .map((p) => assignments.find((a) => a.id === p.assignmentId)?.startDate)
+      .filter((d): d is string => !!d)
+      .sort()
+    if (qualifyingStarts.length === 0) continue
+    const assignmentStart = qualifyingStarts[0]
+    const needles = [
+      ...collectFieldValues(rule.condition, 'work_scope'),
+      ...collectFieldValues(rule.condition, 'duty_tag'),
+    ]
+    let start = assignmentStart
+    if (needles.length) {
+      const scopeStarts = scopes
+        .filter((s) => {
+          if (!s.confirmed) return false
+          const tag = db.workScopeTags.find((t) => t.id === s.tagId)
+          return needles.some((v) => v === s.tagId || tag?.name === v || (tag?.name != null && tag.name.includes(v)))
+        })
+        .map((s) => s.startDate)
+        .sort()
+      if (scopeStarts.length) {
+        const earliestScope = scopeStarts[0]
+        start = assignmentStart > earliestScope ? assignmentStart : earliestScope
+      }
+    }
+    const deadline = addDays(start, days)
     if (asOf <= deadline) {
       return {
         inTransition: true,
@@ -235,6 +287,22 @@ export function calculateAll(db: DB, asOf: string): CalcOutput {
       qualityReasons.push('统计时点无有效任职记录')
     }
     for (const a of assignments) {
+      if (!a.orgId || !orgById(db, a.orgId)) {
+        qualityReasons.push(`组织未标准化：原始「${a.originalOrgName || '（空）'}」`)
+        pushIssue({
+          class: 'data_quality',
+          severity: 'medium',
+          status: 'open',
+          title: `组织名称待治理：${a.originalOrgName || '（空）'}`,
+          personId: person.id,
+          orgId: undefined,
+          assignmentId: a.id,
+          field: 'originalOrgName',
+          originalValue: a.originalOrgName,
+          rationale: `原始组织「${a.originalOrgName || '（空）'}」尚未确认标准组织，不得猜测其所属单位。`,
+          fingerprint: fingerprint(['dq', 'org', person.id, a.originalOrgName || a.id]),
+        })
+      }
       if (a.jobStdStatus === 'unmapped' || !a.standardJobId) {
         qualityReasons.push(`岗位未标准化：原始「${a.originalJobName}」`)
         pushIssue({
@@ -392,25 +460,18 @@ export function calculateAll(db: DB, asOf: string): CalcOutput {
             fingerprint: fingerprint(['rk', 'trans', person.id, certificateId, rule.id]),
           })
         } else if (status === 'satisfied' && match.warning) {
-          const label: Record<string, string> = {
-            hint_180: '一级提示（180天）',
-            warn_90: '二级预警（90天）',
-            warn_30: '三级预警（30天）',
-            urgent_7: '紧急预警（7天）',
-            expired: '已过期',
-          }
           pushIssue({
             class: 'risk',
             severity: match.warning === 'urgent_7' ? 'critical' : match.warning === 'warn_30' ? 'high' : 'medium',
             status: 'open',
-            title: `${label[match.warning]}：${person.name} / ${item.certificateName}`,
+            title: `${EXPIRY_LABEL[match.warning]}：${person.name} / ${item.certificateName}`,
             personId: person.id,
             orgId,
             certificateId,
             holdingId: match.matched[0]?.id,
             ruleId: rule.id,
             ruleVersion: rule.version,
-            rationale: `证书有效截止剩余 ${match.daysLeft} 天，按该证书预警方案触发${label[match.warning]}。当前尚未构成正式不合规。`,
+            rationale: `证书有效截止剩余 ${match.daysLeft} 天，按该证书预警方案触发${EXPIRY_LABEL[match.warning]}。当前尚未构成正式不合规。`,
             ownerOrgId: orgId,
             fingerprint: fingerprint(['rk', match.warning, person.id, certificateId]),
           })
@@ -436,10 +497,6 @@ export function calculateAll(db: DB, asOf: string): CalcOutput {
 
     for (const h of holdings) {
       if (h.certStdStatus !== 'mapped' || !h.standardCertId) continue
-      const already = genIssues.some(
-        (i) => i.holdingId === h.id || (i.personId === person.id && i.certificateId === h.standardCertId && i.class === 'risk'),
-      )
-      if (already) continue
       const p = holdingProblems(h, asOf, db)
       const cert = db.certificates.find((c) => c.id === h.standardCertId)
       if (p.expired) {
@@ -470,19 +527,13 @@ export function calculateAll(db: DB, asOf: string): CalcOutput {
           ownerOrgId: orgId,
           fingerprint: fingerprint(['cp', 'review', h.id]),
         })
-      } else if (p.warning) {
-        const label: Record<string, string> = {
-          hint_180: '一级提示（180天）',
-          warn_90: '二级预警（90天）',
-          warn_30: '三级预警（30天）',
-          urgent_7: '紧急预警（7天）',
-          expired: '已过期',
-        }
+      }
+      if (!p.expired && p.warning) {
         pushIssue({
           class: 'risk',
           severity: p.warning === 'urgent_7' ? 'critical' : p.warning === 'warn_30' ? 'high' : 'medium',
           status: 'open',
-          title: `${label[p.warning]}：${person.name} / ${cert?.name}`,
+          title: `${EXPIRY_LABEL[p.warning]}：${person.name} / ${cert?.name}`,
           personId: person.id,
           orgId,
           certificateId: h.standardCertId,
@@ -490,6 +541,21 @@ export function calculateAll(db: DB, asOf: string): CalcOutput {
           rationale: `剩余 ${p.daysLeft} 天，按证书预警方案触发。尚未构成正式不合规。`,
           ownerOrgId: orgId,
           fingerprint: fingerprint(['rk', p.warning, person.id, h.standardCertId ?? '']),
+        })
+      }
+      if (!p.expired && !p.reviewOverdue && p.reviewWarning) {
+        pushIssue({
+          class: 'risk',
+          severity: p.reviewWarning === 'urgent_7' ? 'critical' : p.reviewWarning === 'warn_30' ? 'high' : 'medium',
+          status: 'open',
+          title: `${REVIEW_LABEL[p.reviewWarning]}：${person.name} / ${cert?.name}`,
+          personId: person.id,
+          orgId,
+          certificateId: h.standardCertId,
+          holdingId: h.id,
+          rationale: `复审日期 ${h.reviewDate}，剩余 ${p.reviewDaysLeft} 天，按该证书复审预警方案触发。当前尚未构成正式不合规。`,
+          ownerOrgId: orgId,
+          fingerprint: fingerprint(['rk', 'review', p.reviewWarning, person.id, h.standardCertId ?? '']),
         })
       }
     }
@@ -744,8 +810,22 @@ export function mergeIssues(prev: Issue[], next: Issue[]): Issue[] {
       out.push(n)
       continue
     }
-    if (old.status === 'closed') {
-      out.push(old)
+    if (old.status === 'closed' || old.status === 'resolved_pending_close') {
+      out.push({
+        ...n,
+        id: old.id,
+        code: old.code,
+        foundAt: old.foundAt,
+        status: 'open',
+        assigneeId: old.assigneeId,
+        reviewerId: old.reviewerId,
+        dueDate: old.dueDate ?? n.dueDate,
+        closedAt: undefined,
+        rationale:
+          old.status === 'closed'
+            ? `${n.rationale}（销项后重算仍存在，已重新打开）`
+            : `${n.rationale}（重算后问题再次出现）`,
+      })
       continue
     }
     out.push({
@@ -765,11 +845,13 @@ export function mergeIssues(prev: Issue[], next: Issue[]): Issue[] {
       out.push(old)
       continue
     }
-    if (old.status === 'open') {
-      out.push({ ...old, status: 'resolved_pending_close', rationale: old.rationale + '（重算后问题已不存在，待销项确认）' })
-    } else {
-      out.push(old)
-    }
+    out.push({
+      ...old,
+      status: 'resolved_pending_close',
+      rationale: old.rationale.includes('重算后问题已不存在')
+        ? old.rationale
+        : old.rationale + '（重算后问题已不存在，待销项确认）',
+    })
   }
   return out
 }

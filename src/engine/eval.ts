@@ -38,7 +38,7 @@ function evalCondition(c: Condition, ctx: EvalCtx): Tri {
   const org = orgById(ctx.db, ctx.assignment.orgId)
   const val = c.value
   const one = Array.isArray(val) ? val[0] : val
-  const many = Array.isArray(val) ? val : [val]
+  const many = (Array.isArray(val) ? val : [val]).filter((v) => v !== '')
 
   switch (c.field) {
     case 'person_status': {
@@ -58,8 +58,8 @@ function evalCondition(c: Condition, ctx: EvalCtx): Tri {
     }
     case 'major': {
       if (hasUnknownJob(ctx)) return 'unknown'
-      const hit = many.includes(job!.major)
-      return c.operator === 'NOT_IN' || c.operator === 'NE' ? fromBool(!hit) : fromBool(hit)
+      const hit = containsOrExact(job!.major, many, c.operator)
+      return c.operator === 'NOT_IN' || c.operator === 'NE' ? fromBool(!many.includes(job!.major)) : fromBool(hit)
     }
     case 'standard_job_id': {
       if (hasUnknownJob(ctx)) return 'unknown'
@@ -68,13 +68,15 @@ function evalCondition(c: Condition, ctx: EvalCtx): Tri {
     }
     case 'job_category': {
       if (hasUnknownJob(ctx)) return 'unknown'
-      const hit = many.includes(job!.category)
-      return c.operator === 'NOT_IN' || c.operator === 'NE' ? fromBool(!hit) : fromBool(hit)
+      const hit = containsOrExact(job!.category, many, c.operator)
+      return c.operator === 'NOT_IN' || c.operator === 'NE' ? fromBool(!many.includes(job!.category)) : fromBool(hit)
     }
     case 'job_tag': {
       if (hasUnknownJob(ctx)) return 'unknown'
-      const hit = many.some((t) => job!.tags.includes(t))
-      return c.operator === 'NOT_IN' || c.operator === 'NE' ? fromBool(!hit) : fromBool(hit)
+      const exact = many.some((t) => job!.tags.includes(t))
+      const contained = many.some((t) => job!.tags.some((tag) => tag.includes(t)))
+      const hit = c.operator === 'CONTAINS' ? contained : exact
+      return c.operator === 'NOT_IN' || c.operator === 'NE' ? fromBool(!exact) : fromBool(hit)
     }
     case 'is_production': {
       if (hasUnknownJob(ctx)) return 'unknown'
@@ -88,9 +90,10 @@ function evalCondition(c: Condition, ctx: EvalCtx): Tri {
       if (conf.length === 0) return 'unknown'
       const names = conf.map((s) => ctx.db.workScopeTags.find((t) => t.id === s.tagId)?.name).filter(Boolean) as string[]
       const ids = conf.map((s) => s.tagId)
-      const hit = many.some((v) => names.includes(v) || ids.includes(v))
-      if (c.operator === 'NOT_IN' || c.operator === 'NE') return fromBool(!hit)
-      return fromBool(hit)
+      const exact = many.some((v) => names.includes(v) || ids.includes(v))
+      const contained = many.some((v) => names.some((n) => n.includes(v)) || ids.includes(v))
+      if (c.operator === 'NOT_IN' || c.operator === 'NE') return fromBool(!exact)
+      return fromBool(c.operator === 'CONTAINS' ? contained : exact)
     }
     case 'assignment_start': {
       if (!ctx.assignment.startDate) return 'unknown'
@@ -111,9 +114,26 @@ function evalCondition(c: Condition, ctx: EvalCtx): Tri {
   }
 }
 
+function containsOrExact(text: string, needles: string[], op: Condition['operator']): boolean {
+  if (op === 'CONTAINS') return needles.some((v) => text.includes(v))
+  return needles.includes(text)
+}
+
 function applyOp(base: Tri, op: Condition['operator'], hit: boolean): Tri {
   if (op === 'NE' || op === 'NOT_IN') return fromBool(!hit)
   return base
+}
+
+export function collectFieldValues(group: ConditionGroup, field: Condition['field']): string[] {
+  const out: string[] = []
+  for (const c of group.conditions) {
+    if (isGroup(c)) out.push(...collectFieldValues(c, field))
+    else if (c.field === field) {
+      const many = Array.isArray(c.value) ? c.value : [c.value]
+      out.push(...many.filter(Boolean))
+    }
+  }
+  return out
 }
 
 export function evalGroup(group: ConditionGroup, ctx: EvalCtx): Tri {

@@ -193,6 +193,20 @@ export function buildSeed(): DB {
     }
   }
 
+  if (!orgs.some((o) => o.standardName === '生产技术部')) {
+    orgs.push({
+      id: 'org_dept_A公司_生产技术部',
+      parentId: companyIds.get('A公司') ?? 'org_root',
+      code: 'A-生产技术部',
+      type: 'department',
+      standardName: '生产技术部',
+      originalName: '生产技术部',
+      effectiveFrom: '2012-01-01',
+      effectiveTo: null,
+      status: 'active',
+    })
+  }
+
   const jobs: StandardJob[] = []
   const jobKey = (category: string, name: string) => `${category}::${name}`
   const jobIds = new Map<string, string>()
@@ -216,6 +230,20 @@ export function buildSeed(): DB {
       effectiveTo: null,
     })
   })
+  if (!jobs.some((j) => j.name === '电气检修技术员')) {
+    jobs.push({
+      id: 'job_std_electrical_repair_tech',
+      name: '电气检修技术员',
+      major: '电气',
+      category: '电气检修',
+      sequence: '技术',
+      isProduction: true,
+      tags: ['电气'],
+      status: 'active',
+      effectiveFrom: '2020-01-01',
+      effectiveTo: null,
+    })
+  }
 
   const workScopeTags = [
     { id: 'ws_hv', name: '高压电气作业', group: '电气' },
@@ -381,6 +409,14 @@ export function buildSeed(): DB {
     }
   })
 
+  const overlay = assignments.find((a) => a.kind === 'primary' && !(Object.values(DEMO) as string[]).includes(a.personId))
+  if (overlay) {
+    overlay.originalJobName = '电修技术员'
+    overlay.standardJobId = null
+    overlay.jobStdStatus = 'unmapped'
+    overlay.originalOrgName = '生技部'
+  }
+
   const pendingNames = new Map<string, { kind: NameMapping['kind']; originalName: string; scopeOrgId: string | null; usage: number }>()
   rows.forEach((p, i) => {
     if (shouldLeaveUnmapped(p.j) || demoByRow.get(i) === DEMO.unmappedJob) {
@@ -391,6 +427,18 @@ export function buildSeed(): DB {
     }
   })
   pendingNames.set('cert:注安师', { kind: 'certificate', originalName: '注安师', scopeOrgId: null, usage: 1 })
+  pendingNames.set('job:电修技术员', {
+    kind: 'job',
+    originalName: '电修技术员',
+    scopeOrgId: companyIds.get('A公司') ?? null,
+    usage: 1,
+  })
+  pendingNames.set('org:生技部', {
+    kind: 'org',
+    originalName: '生技部',
+    scopeOrgId: companyIds.get('A公司') ?? null,
+    usage: 1,
+  })
 
   const mappings: NameMapping[] = [
     ...[...pendingNames.values()].map((m, i): NameMapping => ({
