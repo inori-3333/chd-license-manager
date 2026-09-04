@@ -32,7 +32,7 @@ export function Dashboard() {
     }))
 
   const unitBars = calc.unitStats.map((u) => ({
-    name: u.orgName.replace('发电公司', ''),
+    name: u.orgName.replace('公司', ''),
     合规率: u.personRate == null ? 0 : +(u.personRate * 100).toFixed(1),
     证项完成率: u.itemRate == null ? 0 : +(u.itemRate * 100).toFixed(1),
     覆盖率: +(u.coverage * 100).toFixed(1),
@@ -182,8 +182,8 @@ export function Dashboard() {
             数据质量问题 {s.qualityIssues} 项单独列示，不与合规问题混称「预警」。
           </div>
           <div className="mt-3 rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-500">
-            建议演示路径：名称标准化确认「电修技术员 / 注安师 / 生技部」→ 为郑华补充高压作业范围 → 观察覆盖率与合规率变化 →
-            走王芳应持未持的整改复核。
+            人员与岗位来自《岗位示例表》（1315 条）。建议演示：名称标准化确认「学习岗 / 注安师」→ 为郑华补充高压作业范围 →
+            观察覆盖率与合规率变化 → 走王芳应持未持的整改复核。
           </div>
         </Card>
       </div>

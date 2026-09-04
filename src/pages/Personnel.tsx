@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Badge, Button, Card, Modal, judgeTone } from '../components/ui'
+import { Badge, Button, Card, Modal, Pager, PAGE_SIZE, judgeTone } from '../components/ui'
 import { confirmWorkScope, currentUser, liveCalc, useDb, visibleOrgIds } from '../store'
 import { ITEM_STATUS, JUDGE } from '../format'
 import { assignmentsAt } from '../engine/calculate'
@@ -10,6 +10,7 @@ export function Personnel() {
   const calc = liveCalc(db)
   const scope = visibleOrgIds(db)
   const [q, setQ] = useState('')
+  const [page, setPage] = useState(1)
   const [sel, setSel] = useState<string | null>(null)
   const rows = calc.personResults.filter((r) => {
     const p = db.people.find((x) => x.id === r.personId)
@@ -21,6 +22,7 @@ export function Personnel() {
     if (q && !`${p.name}${p.employeeNo}`.includes(q)) return false
     return true
   })
+  const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
   const person = sel ? db.people.find((p) => p.id === sel) : undefined
   const result = sel ? calc.personResults.find((r) => r.personId === sel) : undefined
 
@@ -31,7 +33,15 @@ export function Personnel() {
           <h1 className="text-xl font-semibold">人员持证详情</h1>
           <p className="mt-1 text-sm text-slate-500">原始岗位/证书名称与标准值并存。判定依据可追溯到规则版本。</p>
         </div>
-        <input className="input" placeholder="搜索姓名/工号" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input
+          className="input"
+          placeholder="搜索姓名/工号"
+          value={q}
+          onChange={(e) => {
+            setQ(e.target.value)
+            setPage(1)
+          }}
+        />
       </div>
       <Card className="overflow-auto p-0">
         <table className="data">
@@ -47,7 +57,7 @@ export function Personnel() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => {
+            {pageRows.map((r) => {
               const p = db.people.find((x) => x.id === r.personId)!
               const asg = assignmentsAt(db, p.id, db.asOfDate)[0]
               const job = asg?.standardJobId ? db.jobs.find((j) => j.id === asg.standardJobId) : undefined
@@ -69,6 +79,7 @@ export function Personnel() {
             })}
           </tbody>
         </table>
+        <Pager page={page} total={rows.length} onPage={setPage} />
       </Card>
       {person && result ? <PersonDetail personId={person.id} onClose={() => setSel(null)} /> : null}
     </div>

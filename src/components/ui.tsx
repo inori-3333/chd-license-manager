@@ -115,3 +115,33 @@ export function issueTone(c: string): 'red' | 'amber' | 'blue' {
   if (c === 'risk') return 'amber'
   return 'blue'
 }
+
+export const PAGE_SIZE = 40
+
+export function Pager({
+  page,
+  total,
+  pageSize = PAGE_SIZE,
+  onPage,
+}: {
+  page: number
+  total: number
+  pageSize?: number
+  onPage: (p: number) => void
+}) {
+  const pages = Math.max(1, Math.ceil(total / pageSize))
+  if (total <= pageSize) return <div className="px-3 py-2 text-xs text-slate-400">共 {total} 条</div>
+  return (
+    <div className="flex items-center justify-end gap-2 px-3 py-2 text-xs text-slate-500">
+      <span>
+        共 {total} 条 · {page}/{pages}
+      </span>
+      <button className="btn btn-ghost" disabled={page <= 1} onClick={() => onPage(page - 1)}>
+        上一页
+      </button>
+      <button className="btn btn-ghost" disabled={page >= pages} onClick={() => onPage(page + 1)}>
+        下一页
+      </button>
+    </div>
+  )
+}

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Badge, Card, judgeTone } from '../components/ui'
+import { Badge, Card, Pager, PAGE_SIZE, judgeTone } from '../components/ui'
 import { liveCalc, useDb } from '../store'
 import { ISSUE_CLASS, ISSUE_STATUS, JUDGE, pct } from '../format'
 import { orgPath } from '../engine/org'
@@ -21,6 +21,13 @@ export function Reports() {
   const db = useDb()
   const calc = liveCalc(db)
   const [tab, setTab] = useState<(typeof TABS)[number]>('单位综合')
+  const [page, setPage] = useState(1)
+  const slice = <T,>(arr: T[]) => arr.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  const missingList = useMemo(() => {
+    return calc.personResults.flatMap((r) =>
+      r.requiredItems.filter((i) => !i.incentive && i.status === 'missing').map((item) => ({ r, item })),
+    )
+  }, [calc.personResults])
 
   const certRows = useMemo(() => {
     const map = new Map<
@@ -87,7 +94,14 @@ export function Reports() {
       </div>
       <div className="flex flex-wrap gap-2">
         {TABS.map((t) => (
-          <button key={t} className={`btn ${tab === t ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setTab(t)}>
+          <button
+            key={t}
+            className={`btn ${tab === t ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => {
+              setTab(t)
+              setPage(1)
+            }}
+          >
             {t}
           </button>
         ))}
@@ -181,7 +195,7 @@ export function Reports() {
               </tr>
             </thead>
             <tbody>
-              {jobRows.map((r, i) => (
+              {slice(jobRows).map((r, i) => (
                 <tr key={i}>
                   <td>{r.org}</td>
                   <td>{r.major}</td>
@@ -195,6 +209,7 @@ export function Reports() {
               ))}
             </tbody>
           </table>
+          <Pager page={page} total={jobRows.length} onPage={setPage} />
         </Card>
       ) : null}
 
@@ -214,7 +229,7 @@ export function Reports() {
               </tr>
             </thead>
             <tbody>
-              {calc.personResults.flatMap((r) => {
+              {slice(missingList).map(({ r, item: i }) => {
                 const p = db.people.find((x) => x.id === r.personId)!
                 const asg = assignmentsAt(db, p.id, db.asOfDate)[0]
                 const job = asg?.standardJobId ? db.jobs.find((j) => j.id === asg.standardJobId)?.name : asg?.originalJobName
@@ -223,28 +238,25 @@ export function Reports() {
                   .map((s) => db.workScopeTags.find((t) => t.id === s.tagId)?.name)
                   .filter(Boolean)
                   .join('、')
-                return r.requiredItems
-                  .filter((i) => !i.incentive && i.status === 'missing')
-                  .map((i) => {
-                    const iss = db.issues.find((x) => x.personId === p.id && x.certificateId === i.certificateId && x.class === 'compliance')
-                    return (
-                      <tr key={p.id + i.certificateId + i.ruleId}>
-                        <td>{asg ? orgPath(db, asg.orgId) : '—'}</td>
-                        <td>{p.name}</td>
-                        <td>{p.employeeNo}</td>
-                        <td>{job}</td>
-                        <td>{scopes || '—'}</td>
-                        <td>{i.certificateName}</td>
-                        <td>
-                          {i.ruleName} v{i.ruleVersion}
-                        </td>
-                        <td>{iss ? ISSUE_STATUS[iss.status] : '—'}</td>
-                      </tr>
-                    )
-                  })
+                const iss = db.issues.find((x) => x.personId === p.id && x.certificateId === i.certificateId && x.class === 'compliance')
+                return (
+                  <tr key={p.id + i.certificateId + i.ruleId}>
+                    <td>{asg ? orgPath(db, asg.orgId) : '—'}</td>
+                    <td>{p.name}</td>
+                    <td>{p.employeeNo}</td>
+                    <td>{job}</td>
+                    <td>{scopes || '—'}</td>
+                    <td>{i.certificateName}</td>
+                    <td>
+                      {i.ruleName} v{i.ruleVersion}
+                    </td>
+                    <td>{iss ? ISSUE_STATUS[iss.status] : '—'}</td>
+                  </tr>
+                )
               })}
             </tbody>
           </table>
+          <Pager page={page} total={missingList.length} onPage={setPage} />
         </Card>
       ) : null}
 
@@ -377,7 +389,7 @@ export function Reports() {
               </tr>
             </thead>
             <tbody>
-              {db.issues.map((i) => (
+              {slice(db.issues).map((i) => (
                 <tr key={i.id}>
                   <td>{i.code}</td>
                   <td>{i.orgId ? orgPath(db, i.orgId) : '—'}</td>
@@ -392,6 +404,7 @@ export function Reports() {
               ))}
             </tbody>
           </table>
+          <Pager page={page} total={db.issues.length} onPage={setPage} />
         </Card>
       ) : null}
 
@@ -435,7 +448,7 @@ export function Reports() {
               </tr>
             </thead>
             <tbody>
-              {calc.personResults.map((r) => {
+              {slice(calc.personResults).map((r) => {
                 const p = db.people.find((x) => x.id === r.personId)!
                 return (
                   <tr key={p.id}>

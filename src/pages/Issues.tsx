@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Badge, Button, Card, Modal, issueTone } from '../components/ui'
+import { Badge, Button, Card, Modal, Pager, PAGE_SIZE, issueTone } from '../components/ui'
 import { can, startRemediation, useDb, visibleOrgIds } from '../store'
 import { ISSUE_CLASS, ISSUE_STATUS } from '../format'
 import { orgPath } from '../engine/org'
@@ -18,6 +18,7 @@ export function Issues() {
   const scope = visibleOrgIds(db)
   const [tab, setTab] = useState<IssueClass | 'all'>('all')
   const [q, setQ] = useState('')
+  const [page, setPage] = useState(1)
   const [sel, setSel] = useState<Issue | null>(null)
 
   const rows = useMemo(() => {
@@ -47,11 +48,26 @@ export function Issues() {
       </div>
       <div className="flex flex-wrap items-center gap-2">
         {TABS.map((t) => (
-          <Button key={t.id} kind={tab === t.id ? 'primary' : 'ghost'} onClick={() => setTab(t.id)}>
+          <Button
+            key={t.id}
+            kind={tab === t.id ? 'primary' : 'ghost'}
+            onClick={() => {
+              setTab(t.id)
+              setPage(1)
+            }}
+          >
             {t.label} ({counts[t.id]})
           </Button>
         ))}
-        <input className="input ml-auto" placeholder="搜索问题/依据" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input
+          className="input ml-auto"
+          placeholder="搜索问题/依据"
+          value={q}
+          onChange={(e) => {
+            setQ(e.target.value)
+            setPage(1)
+          }}
+        />
       </div>
       <Card className="overflow-auto p-0">
         <table className="data">
@@ -69,7 +85,7 @@ export function Issues() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((i) => {
+            {rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((i) => {
               const person = db.people.find((p) => p.id === i.personId)
               const rule = db.rules.find((r) => r.id === i.ruleId)
               return (
@@ -94,6 +110,7 @@ export function Issues() {
             })}
           </tbody>
         </table>
+        <Pager page={page} total={rows.length} onPage={setPage} />
       </Card>
 
       {sel ? (

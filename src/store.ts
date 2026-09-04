@@ -17,7 +17,7 @@ import { suggest } from './engine/standardize'
 import { detectConflicts, simulateRule } from './engine/conflict'
 import { descendantIds } from './engine/org'
 
-const KEY = 'chd-license-manager.db.v1'
+const KEY = 'chd-license-manager.db.v2'
 
 let db: DB = load()
 const listeners = new Set<() => void>()
@@ -27,7 +27,7 @@ function load(): DB {
     const raw = localStorage.getItem(KEY)
     if (raw) {
       const parsed = JSON.parse(raw) as DB
-      if (parsed?.version === 1 && parsed.people?.length) return parsed
+      if (parsed?.version === 2 && parsed.people?.length) return parsed
     }
   } catch {
     /* ignore */
@@ -506,6 +506,11 @@ export function emptyGroup(): ConditionGroup {
   return { logic: 'AND', conditions: [] }
 }
 
+let calcCache: { db: DB; asOf: string; result: ReturnType<typeof calculateAll> } | null = null
+
 export function liveCalc(d = db) {
-  return calculateAll(d, d.asOfDate)
+  if (calcCache && calcCache.db === d && calcCache.asOf === d.asOfDate) return calcCache.result
+  const result = calculateAll(d, d.asOfDate)
+  calcCache = { db: d, asOf: d.asOfDate, result }
+  return result
 }
