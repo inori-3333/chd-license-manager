@@ -60,6 +60,7 @@ export const CERT_CAT: Record<string, string> = {
 export const JUDGE: Record<string, string> = {
   compliant: '合规',
   noncompliant: '不合规',
+  at_risk: '过渡期/风险中',
   undecidable: '无法判定',
   out_of_scope: '不在范围',
 }
@@ -67,6 +68,8 @@ export const JUDGE: Record<string, string> = {
 export const ITEM_STATUS: Record<string, string> = {
   satisfied: '已满足',
   missing: '应持未持',
+  not_yet_valid: '尚未生效',
+  registration_invalid: '注册状态异常',
   expired: '证书过期',
   review_overdue: '复审逾期',
   grade_insufficient: '等级不足',

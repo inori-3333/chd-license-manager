@@ -17,7 +17,7 @@ import { suggest } from './engine/standardize'
 import { detectConflicts, simulateRule } from './engine/conflict'
 import { descendantIds } from './engine/org'
 
-const KEY = 'chd-license-manager.db.v2'
+const KEY = 'chd-license-manager.db.v5'
 
 let db: DB = load()
 const listeners = new Set<() => void>()
@@ -27,7 +27,7 @@ function load(): DB {
     const raw = localStorage.getItem(KEY)
     if (raw) {
       const parsed = JSON.parse(raw) as DB
-      if (parsed?.version === 2 && parsed.people?.length) return parsed
+      if (parsed?.version === 5 && parsed.people?.length) return parsed
     }
   } catch {
     /* ignore */

@@ -20,6 +20,21 @@ export function classifyPosition(p: PositionRow): JobClass {
   if (/安培|安全专工|专职安全|安全监察/.test(p.j) || (/安全员/.test(p.j) && /办公室|管理|质检部/.test(p.d + p.t))) {
     return { category: '安全管理', major: '安全', sequence: '管理', isProduction: true }
   }
+  if (/焊工|焊接|热切割/.test(blob)) {
+    return { category: '焊接检修', major: '焊接', sequence: '技能', isProduction: true }
+  }
+  if (/起重|天车/.test(blob) || /行车/.test(p.j)) {
+    return { category: '起重作业', major: '起重', sequence: '技能', isProduction: true }
+  }
+  if (/叉车/.test(blob)) {
+    return { category: '厂内车辆作业', major: '特种设备', sequence: '技能', isProduction: true }
+  }
+  if (/消防设施|消防控制|消防值班/.test(blob)) {
+    return { category: '消防设施操作', major: '消防', sequence: '运行', isProduction: true }
+  }
+  if (/法务|法律合规/.test(blob)) {
+    return { category: '法律合规', major: '法律', sequence: '管理', isProduction: false }
+  }
   if (/电气操作|电运|电气专工|值班电工|操作电工|电工班|运行电工/.test(blob)) {
     return {
       category: /检修/.test(blob) ? '电气检修' : '电气运行',

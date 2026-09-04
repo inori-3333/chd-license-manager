@@ -55,11 +55,57 @@ describe('规则引擎与口径', () => {
     expect(calc.issues.some((i) => i.personId === DEMO.review && i.title.includes('复审'))).toBe(true)
   })
 
-  it('新上岗过渡期内未持证记预警而非不合规', () => {
+  it('特种作业现岗人员无制度宽限期，应持未持直接形成合规问题', () => {
     const r = calc.personResults.find((x) => x.personId === DEMO.transition)
-    expect(r?.requiredItems.some((i) => i.certificateId === 'cert_hv' && i.status === 'in_transition')).toBe(true)
-    expect(calc.issues.some((i) => i.personId === DEMO.transition && i.class === 'risk' && i.title.includes('过渡期'))).toBe(true)
-    expect(calc.issues.some((i) => i.personId === DEMO.transition && i.class === 'compliance' && i.title.includes('应持未持'))).toBe(false)
+    expect(r?.requiredItems.some((i) => i.certificateId === 'cert_hv' && i.status === 'missing')).toBe(true)
+    expect(calc.issues.some((i) => i.personId === DEMO.transition && i.class === 'compliance' && i.title.includes('应持未持'))).toBe(true)
+  })
+
+  it('2027年起新上岗规则独立产生要求且不重复生成同一证项', () => {
+    const local = buildSeed()
+    const asg = local.assignments.find((a) => a.personId === DEMO.transition && a.kind === 'primary')!
+    asg.startDate = '2027-01-02'
+    const scope = local.personWorkScopes.find((s) => s.personId === DEMO.transition)!
+    scope.startDate = '2027-01-02'
+    const next = calculateAll(local, '2027-01-03')
+    const r = next.personResults.find((x) => x.personId === DEMO.transition)!
+    const hv = r.requiredItems.filter((i) => i.certificateId === 'cert_hv')
+    expect(hv).toHaveLength(1)
+    expect(hv[0].sources?.some((s) => s.ruleId === 'rule_new')).toBe(true)
+    expect(hv[0].status).toBe('missing')
+    expect(r.judgement).toBe('noncompliant')
+  })
+
+  it('显式配置的过渡期只记风险，且不计入已完成证项', () => {
+    const local = buildSeed()
+    local.rules.push({
+      id: 'rule_transition_test',
+      code: 'R-TRANS-TEST',
+      name: '测试过渡期',
+      type: 'transition',
+      certCategory: 'national',
+      version: 1,
+      familyId: 'fam_transition_test',
+      status: 'active',
+      condition: {
+        logic: 'AND',
+        conditions: [
+          { field: 'job_category', operator: 'IN', value: ['电气检修', '电气运行', '集控运行'] },
+          { field: 'work_scope', operator: 'CONTAINS', value: '高压电气作业' },
+        ],
+      },
+      requirement: { logic: 'AND', items: [{ certificateId: 'cert_hv' }] },
+      transitionDays: 90,
+      effectiveFrom: '2026-01-01',
+      effectiveTo: null,
+      createdBy: 'u_spec',
+      notes: '引擎能力测试，不代表现行高压作业制度。',
+    })
+    const next = calculateAll(local, local.asOfDate)
+    const r = next.personResults.find((x) => x.personId === DEMO.transition)!
+    expect(r.requiredItems.some((i) => i.certificateId === 'cert_hv' && i.status === 'in_transition')).toBe(true)
+    expect(r.judgement).toBe('at_risk')
+    expect(next.issues.some((i) => i.personId === DEMO.transition && i.class === 'risk' && i.title.includes('过渡期'))).toBe(true)
   })
 
   it('人员合规率分母仅为可判定人员', () => {
@@ -106,6 +152,29 @@ describe('规则引擎与口径', () => {
 
   it('过渡期只用适用任职/作业开始日，不取无关兼岗更晚日期', () => {
     const local = buildSeed()
+    local.rules.push({
+      id: 'rule_transition_boundary',
+      code: 'R-TRANS-BOUNDARY',
+      name: '测试过渡期边界',
+      type: 'transition',
+      certCategory: 'national',
+      version: 1,
+      familyId: 'fam_transition_boundary',
+      status: 'active',
+      condition: {
+        logic: 'AND',
+        conditions: [
+          { field: 'job_category', operator: 'IN', value: ['电气检修', '电气运行', '集控运行'] },
+          { field: 'work_scope', operator: 'CONTAINS', value: '高压电气作业' },
+        ],
+      },
+      requirement: { logic: 'AND', items: [{ certificateId: 'cert_hv' }] },
+      transitionDays: 90,
+      effectiveFrom: '2026-01-01',
+      effectiveTo: null,
+      createdBy: 'u_spec',
+      notes: '测试',
+    })
     const pid = DEMO.missingCert
     const primary = local.assignments.find((a) => a.personId === pid)!
     local.assignments.push({
@@ -134,6 +203,56 @@ describe('规则引擎与口径', () => {
     expect(db.mappings.find((m) => m.originalName === '电修技术员')?.candidates.some((c) => c.standardName === '电气检修技术员')).toBe(true)
     expect(db.mappings.find((m) => m.originalName === '生技部')?.candidates.some((c) => c.standardName === '生产技术部')).toBe(true)
   })
+
+  it('尚未生效和注册状态异常的证书不得算作有效持证', () => {
+    const future = buildSeed()
+    const hf = future.holdings.find((h) => h.personId === DEMO.exp180 && h.standardCertId === 'cert_hv')!
+    hf.validFrom = '2027-01-01'
+    const futureCalc = calculateAll(future, future.asOfDate)
+    expect(futureCalc.personResults.find((r) => r.personId === DEMO.exp180)?.requiredItems.some((i) => i.status === 'not_yet_valid')).toBe(true)
+
+    const invalid = buildSeed()
+    const hi = invalid.holdings.find((h) => h.personId === DEMO.exp180 && h.standardCertId === 'cert_hv')!
+    hi.registerStatus = '注销'
+    const invalidCalc = calculateAll(invalid, invalid.asOfDate)
+    expect(invalidCalc.personResults.find((r) => r.personId === DEMO.exp180)?.requiredItems.some((i) => i.status === 'registration_invalid')).toBe(true)
+  })
+
+  it('证书有效截止或复审日期缺失时返回数据不足', () => {
+    const local = buildSeed()
+    const holding = local.holdings.find((h) => h.personId === DEMO.exp180 && h.standardCertId === 'cert_hv')!
+    holding.validTo = null
+    holding.reviewDate = null
+    const next = calculateAll(local, local.asOfDate)
+    const result = next.personResults.find((r) => r.personId === DEMO.exp180)!
+    expect(result.judgement).toBe('undecidable')
+    expect(result.requiredItems.some((i) => i.certificateId === 'cert_hv' && i.status === 'unknown')).toBe(true)
+    expect(next.issues.some((i) => i.personId === DEMO.exp180 && i.class === 'data_quality' && i.title.includes('证书关键数据不足'))).toBe(true)
+  })
+
+  it('与当前岗位无关的过期证书不误报正式合规问题', () => {
+    const local = buildSeed()
+    const source = local.holdings.find((h) => h.standardCertId === 'cert_hv')!
+    local.holdings.push({
+      ...source,
+      id: 'h_unrelated_expired',
+      personId: DEMO.finance,
+      validFrom: '2020-01-01',
+      validTo: '2025-01-01',
+      reviewDate: null,
+    })
+    const next = calculateAll(local, local.asOfDate)
+    expect(next.issues.some((i) => i.personId === DEMO.finance && i.certificateId === 'cert_hv' && i.class === 'compliance')).toBe(false)
+    expect(next.issues.some((i) => i.personId === DEMO.finance && i.certificateId === 'cert_hv' && i.class === 'risk' && i.title.includes('非当前应持'))).toBe(true)
+  })
+
+  it('制度证书库分类与附件一致', () => {
+    expect(db.certificates.find((c) => c.id === 'cert_cse')?.category).toBe('national')
+    expect(db.certificates.find((c) => c.id === 'cert_se')?.category).toBe('national')
+    expect(db.certificates.find((c) => c.id === 'cert_prod_ability')?.category).toBe('group')
+    expect(db.certificates.find((c) => c.id === 'cert_skill_technician')?.category).toBe('incentive')
+    expect(db.certificates.length).toBeGreaterThanOrEqual(40)
+  })
 })
 
 describe('标准化漏斗', () => {
@@ -161,6 +280,14 @@ describe('规则冲突', () => {
     const draft = db.rules.find((r) => r.id === 'rule_cse_conflict')!
     const c = detectConflicts(db, draft)
     expect(c.conflicting).toBe(true)
+  })
+
+  it('正文与附件的法律职业资格节点冲突不得自动裁决', () => {
+    const db = buildSeed()
+    const annex = db.rules.find((r) => r.id === 'rule_legal_annex')!
+    const c = detectConflicts(db, annex)
+    expect(c.conflicting).toBe(true)
+    expect(c.items.some((i) => i.ruleId === 'rule_legal_body')).toBe(true)
   })
 })
 

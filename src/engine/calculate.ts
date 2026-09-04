@@ -51,11 +51,20 @@ export function isHoldingEffective(h: CertHolding, asOf: string, db: DB): boolea
   if (h.certStdStatus !== 'mapped' || !h.standardCertId) return false
   const cert = db.certificates.find((c) => c.id === h.standardCertId)
   if (!cert) return false
+  if (h.validFrom && asOf < h.validFrom) return false
+  if (!isRegistrationValid(h.registerStatus)) return false
   if (cert.hasExpiry) {
-    if (h.validFrom && asOf < h.validFrom) return false
+    if (!h.validFrom || !h.validTo) return false
     if (h.validTo && asOf > h.validTo) return false
   }
+  if (cert.needsReview && !h.reviewDate) return false
   return true
+}
+
+function isRegistrationValid(status: string): boolean {
+  const normalized = status.trim()
+  if (!normalized) return false
+  return !/注销|失效|无效|未注册|暂停|吊销|不合格/.test(normalized)
 }
 
 function levelFromNodes(daysLeft: number, nodes: number[], enabled: boolean): WarningLevel | undefined {
@@ -168,23 +177,61 @@ function matchHolding(
     return { status: 'grade_insufficient', matched: seriesHits, note: `已持相关证书但等级不足（要求≥${minGradeOrder}）` }
   }
 
-  const problems = gradeOk.map((h) => ({ h, p: holdingProblems(h, asOf, db) }))
+  const started = gradeOk.filter((h) => !h.validFrom || h.validFrom <= asOf)
+  if (started.length === 0) {
+    const first = [...gradeOk].sort((a, b) => a.validFrom.localeCompare(b.validFrom))[0]
+    return {
+      status: 'not_yet_valid',
+      matched: gradeOk,
+      note: `已登记「${target.name}」，但有效期自 ${first.validFrom} 开始，统计时点尚未生效`,
+    }
+  }
+
+  const registered = started.filter((h) => isRegistrationValid(h.registerStatus))
+  if (registered.length === 0) {
+    return {
+      status: 'registration_invalid',
+      matched: started,
+      note: `持有「${target.name}」，但注册状态为「${started.map((h) => h.registerStatus || '空').join('、')}」`,
+    }
+  }
+
+  const complete = registered.filter(
+    (h) => (!target.hasExpiry || (!!h.validFrom && !!h.validTo)) && (!target.needsReview || !!h.reviewDate),
+  )
+  const incomplete = registered.filter((h) => !complete.includes(h))
+  const problems = complete.map((h) => ({ h, p: holdingProblems(h, asOf, db) }))
   const live = problems.filter((x) => !x.p.expired)
+  const valid = live.filter((x) => !x.p.reviewOverdue)
+  if (valid.length > 0) {
+    const best = valid.sort((a, b) => (a.p.daysLeft ?? 99999) - (b.p.daysLeft ?? 99999))[0]
+    return {
+      status: 'satisfied',
+      matched: valid.map((x) => x.h),
+      daysLeft: best.p.daysLeft,
+      warning: best.p.warning,
+      note: `已持有效「${target.name}」`,
+    }
+  }
+  if (incomplete.length > 0) {
+    const missingFields = [
+      target.hasExpiry && incomplete.some((h) => !h.validTo) ? '有效截止日期' : '',
+      target.needsReview && incomplete.some((h) => !h.reviewDate) ? '复审日期' : '',
+    ].filter(Boolean)
+    return {
+      status: 'unknown',
+      matched: incomplete,
+      note: `已持「${target.name}」，但缺少${missingFields.join('、') || '关键日期'}，不得推断证书有效`,
+    }
+  }
   if (live.length === 0) {
-    return { status: 'expired', matched: gradeOk, note: `持有「${target.name}」但在统计时点已过期` }
+    return { status: 'expired', matched: registered, note: `持有「${target.name}」但在统计时点已过期` }
   }
   const reviewBad = live.filter((x) => x.p.reviewOverdue)
   if (reviewBad.length === live.length) {
     return { status: 'review_overdue', matched: reviewBad.map((x) => x.h), note: `持有「${target.name}」但复审已逾期` }
   }
-  const best = live.sort((a, b) => (a.p.daysLeft ?? 99999) - (b.p.daysLeft ?? 99999))[0]
-  return {
-    status: 'satisfied',
-    matched: live.map((x) => x.h),
-    daysLeft: best.p.daysLeft,
-    warning: best.p.warning,
-    note: `已持有效「${target.name}」`,
-  }
+  return { status: 'unknown', matched: registered, note: `「${target.name}」状态无法确定` }
 }
 
 function transitionOverlay(
@@ -196,7 +243,7 @@ function transitionOverlay(
   certId: string,
   asOf: string,
 ): { inTransition: boolean; deadline?: string; daysLeft?: number; rule?: Rule } {
-  const tRules = rules.filter((r) => r.type === 'transition' || r.type === 'new_post')
+  const tRules = rules.filter((r) => r.type === 'transition')
   for (const rule of tRules) {
     if (!rule.requirement.items.some((i) => i.certificateId === certId)) continue
     const app = evalPersonApplicability(rule.condition, db, person, assignments, scopes, asOf)
@@ -357,9 +404,25 @@ export function calculateAll(db: DB, asOf: string): CalcOutput {
     }
 
     const requiredItems: RequiredItem[] = []
+    const appendRequiredItem = (item: RequiredItem) => {
+      const source = { ruleId: item.ruleId, ruleName: item.ruleName, ruleVersion: item.ruleVersion }
+      const existing = requiredItems.find(
+        (x) => x.certificateId === item.certificateId && x.minGradeOrder === item.minGradeOrder && x.incentive === item.incentive,
+      )
+      if (!existing) {
+        requiredItems.push({ ...item, sources: [source] })
+        return
+      }
+      if (!existing.sources?.some((s) => s.ruleId === source.ruleId)) {
+        existing.sources = [...(existing.sources ?? []), source]
+      }
+      if (!existing.explanation.includes(item.explanation)) {
+        existing.explanation += `；${item.explanation}`
+      }
+    }
     let undecidable = qualityReasons.length > 0
 
-    for (const rule of rules.filter((r) => r.type === 'personal_mandatory' || r.type === 'incentive')) {
+    for (const rule of rules.filter((r) => r.type === 'personal_mandatory' || r.type === 'new_post' || r.type === 'incentive')) {
       const app = evalPersonApplicability(rule.condition, db, person, assignments, scopes, asOf)
       const condText = explainCondition(rule.condition)
       if (app.result === 'false') {
@@ -383,7 +446,7 @@ export function calculateAll(db: DB, asOf: string): CalcOutput {
             field: missingScope ? 'work_scope' : 'applicability',
             rationale: `条件「${condText}」在当前数据下为「无法判定」。系统拒绝猜测是否应持证。`,
             ownerOrgId: orgId,
-            fingerprint: fingerprint(['dq', 'unknown', person.id, rule.id, String(rule.version)]),
+            fingerprint: fingerprint(['dq', 'unknown', person.id, missingScope ? 'work_scope' : rule.id, missingScope ? '' : String(rule.version)]),
           })
         }
         continue
@@ -418,20 +481,40 @@ export function calculateAll(db: DB, asOf: string): CalcOutput {
           daysLeft: match.daysLeft,
           warningLevel: match.warning,
         }
-        requiredItems.push(item)
+        appendRequiredItem(item)
 
         if (rule.type === 'incentive') return
 
-        if (status === 'missing' || status === 'expired' || status === 'review_overdue' || status === 'grade_insufficient') {
+        if (status === 'unknown') {
+          pushIssue({
+            class: 'data_quality',
+            severity: 'high',
+            status: 'open',
+            title: `证书关键数据不足：${person.name} / ${item.certificateName}`,
+            personId: person.id,
+            orgId,
+            certificateId,
+            ruleId: rule.id,
+            ruleVersion: rule.version,
+            rationale: `${extra}。系统不将关键日期缺失的证书推断为有效或无效。`,
+            ownerOrgId: orgId,
+            fingerprint: fingerprint(['dq', 'holding', person.id, certificateId]),
+          })
+          return
+        }
+
+        if (status === 'missing' || status === 'not_yet_valid' || status === 'registration_invalid' || status === 'expired' || status === 'review_overdue' || status === 'grade_insufficient') {
           const titleMap: Record<string, string> = {
             missing: `应持未持：${person.name} / ${item.certificateName}`,
+            not_yet_valid: `证书尚未生效：${person.name} / ${item.certificateName}`,
+            registration_invalid: `证书注册状态异常：${person.name} / ${item.certificateName}`,
             expired: `证书过期：${person.name} / ${item.certificateName}`,
             review_overdue: `复审逾期：${person.name} / ${item.certificateName}`,
             grade_insufficient: `证书等级不足：${person.name} / ${item.certificateName}`,
           }
           pushIssue({
             class: 'compliance',
-            severity: status === 'missing' || status === 'expired' ? 'high' : 'medium',
+            severity: status === 'missing' || status === 'expired' || status === 'registration_invalid' ? 'high' : 'medium',
             status: 'open',
             title: titleMap[status],
             personId: person.id,
@@ -442,7 +525,7 @@ export function calculateAll(db: DB, asOf: string): CalcOutput {
             rationale: `触发规则「${rule.name}」v${rule.version}。${extra} 判定依据：${condText}。`,
             ownerOrgId: orgId,
             dueDate: addDaysSafe(asOf, 30),
-            fingerprint: fingerprint(['cp', status, person.id, certificateId, rule.id]),
+            fingerprint: fingerprint(['cp', status, person.id, certificateId]),
           })
         } else if (status === 'in_transition') {
           pushIssue({
@@ -499,33 +582,44 @@ export function calculateAll(db: DB, asOf: string): CalcOutput {
       if (h.certStdStatus !== 'mapped' || !h.standardCertId) continue
       const p = holdingProblems(h, asOf, db)
       const cert = db.certificates.find((c) => c.id === h.standardCertId)
-      if (p.expired) {
+      const isRequired = requiredItems.some((i) => !i.incentive && i.certificateId === h.standardCertId)
+      const started = !h.validFrom || h.validFrom <= asOf
+      const registrationValid = isRegistrationValid(h.registerStatus)
+      if (!started || !registrationValid) {
+        if (!isRequired) {
+          pushIssue({
+            class: 'risk',
+            severity: 'low',
+            status: 'open',
+            title: `非当前应持证书状态异常：${person.name} / ${cert?.name}`,
+            personId: person.id,
+            orgId,
+            certificateId: h.standardCertId,
+            holdingId: h.id,
+            rationale: !started
+              ? `证书有效期自 ${h.validFrom} 开始，当前尚未生效；且没有已发布规则证明该人员必须持有，故不产生正式合规问题。`
+              : `证书注册状态为「${h.registerStatus || '空'}」；且没有已发布规则证明该人员必须持有，故不产生正式合规问题。`,
+            ownerOrgId: orgId,
+            fingerprint: fingerprint(['rk', 'inactive-holding-status', h.id]),
+          })
+        }
+        continue
+      }
+      if ((p.expired || p.reviewOverdue) && !isRequired) {
         pushIssue({
-          class: 'compliance',
-          severity: 'high',
+          class: 'risk',
+          severity: 'low',
           status: 'open',
-          title: `证书过期：${person.name} / ${cert?.name}`,
+          title: `非当前应持证书已失效：${person.name} / ${cert?.name}`,
           personId: person.id,
           orgId,
           certificateId: h.standardCertId,
           holdingId: h.id,
-          rationale: `证书「${h.originalName}」有效期至 ${h.validTo}，统计时点已过期。`,
+          rationale: p.expired
+            ? `证书「${h.originalName}」有效期至 ${h.validTo}，但当前没有已发布规则证明该人员必须持有，故不产生正式合规问题。`
+            : `证书「${h.originalName}」复审日期 ${h.reviewDate} 已过，但当前没有已发布规则证明该人员必须持有，故不产生正式合规问题。`,
           ownerOrgId: orgId,
-          fingerprint: fingerprint(['cp', 'expired-hold', h.id]),
-        })
-      } else if (p.reviewOverdue) {
-        pushIssue({
-          class: 'compliance',
-          severity: 'medium',
-          status: 'open',
-          title: `复审逾期：${person.name} / ${cert?.name}`,
-          personId: person.id,
-          orgId,
-          certificateId: h.standardCertId,
-          holdingId: h.id,
-          rationale: `复审日期 ${h.reviewDate} 早于统计时点。`,
-          ownerOrgId: orgId,
-          fingerprint: fingerprint(['cp', 'review', h.id]),
+          fingerprint: fingerprint(['rk', 'inactive-holding', h.id]),
         })
       }
       if (!p.expired && p.warning) {
@@ -570,11 +664,20 @@ export function calculateAll(db: DB, asOf: string): CalcOutput {
         qualityReasons,
         explanation,
       })
-    } else if (mandatory.some((i) => ['missing', 'expired', 'review_overdue', 'grade_insufficient'].includes(i.status))) {
+    } else if (mandatory.some((i) => ['missing', 'not_yet_valid', 'registration_invalid', 'expired', 'review_overdue', 'grade_insufficient'].includes(i.status))) {
       personResults.push({
         personId: person.id,
         asOf,
         judgement: 'noncompliant',
+        requiredItems,
+        qualityReasons,
+        explanation,
+      })
+    } else if (mandatory.some((i) => i.status === 'in_transition')) {
+      personResults.push({
+        personId: person.id,
+        asOf,
+        judgement: 'at_risk',
         requiredItems,
         qualityReasons,
         explanation,
@@ -709,7 +812,7 @@ function summarize(db: DB, results: PersonResult[], issues: Issue[], asOf: strin
   const decidable = results.filter((r) => r.judgement !== 'undecidable').length
   const compliant = results.filter((r) => r.judgement === 'compliant').length
   const items = results.flatMap((r) => r.requiredItems.filter((i) => !i.incentive && i.status !== 'unknown'))
-  const satisfied = items.filter((i) => i.status === 'satisfied' || i.status === 'in_transition')
+  const satisfied = items.filter((i) => i.status === 'satisfied')
   const national = sliceOf(db, results, 'national')
   const group = sliceOf(db, results, 'group')
   const year = asOf.slice(0, 4)
@@ -752,7 +855,7 @@ function sliceOf(db: DB, results: PersonResult[], cat: 'national' | 'group'): Ca
     })
     if (items.length === 0) continue
     people.add(r.personId)
-    if (items.every((i) => i.status === 'satisfied' || i.status === 'in_transition')) ok.add(r.personId)
+    if (items.every((i) => i.status === 'satisfied')) ok.add(r.personId)
     for (const i of items) {
       if (i.status === 'missing') s.missing += 1
       if (i.status === 'expired') s.expired += 1
@@ -782,7 +885,7 @@ function summarizeUnit(
   const decidable = people.filter((r) => r.judgement !== 'undecidable').length
   const compliant = people.filter((r) => r.judgement === 'compliant').length
   const items = people.flatMap((r) => r.requiredItems.filter((i) => !i.incentive && i.status !== 'unknown'))
-  const satisfied = items.filter((i) => i.status === 'satisfied' || i.status === 'in_transition')
+  const satisfied = items.filter((i) => i.status === 'satisfied')
   return {
     orgId,
     orgName,

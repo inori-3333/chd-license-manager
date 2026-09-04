@@ -11,6 +11,7 @@ import {
   Table2,
   RefreshCw,
   RotateCcw,
+  BookOpenCheck,
 } from 'lucide-react'
 import { currentUser, recalc, resetDemo, setAsOf, setUser, useDb } from '../store'
 import { ROLE_LABEL } from '../format'
@@ -22,6 +23,7 @@ const NAV = [
   { to: '/import', label: '数据导入', icon: Upload },
   { to: '/standardize', label: '名称标准化', icon: SpellCheck },
   { to: '/personnel', label: '人员持证', icon: Users },
+  { to: '/policy-standards', label: '制度标准', icon: BookOpenCheck },
   { to: '/rules', label: '规则中心', icon: Scale },
   { to: '/issues', label: '问题中心', icon: TriangleAlert },
   { to: '/remediation', label: '整改闭环', icon: ListChecks },

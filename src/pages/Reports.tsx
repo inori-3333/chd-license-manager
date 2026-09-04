@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Badge, Card, Pager, PAGE_SIZE, judgeTone } from '../components/ui'
 import { liveCalc, useDb } from '../store'
-import { ISSUE_CLASS, ISSUE_STATUS, JUDGE, pct } from '../format'
+import { CERT_CAT, ISSUE_CLASS, ISSUE_STATUS, JUDGE, pct } from '../format'
 import { orgPath } from '../engine/org'
 import { assignmentsAt } from '../engine/calculate'
 
@@ -47,8 +47,8 @@ export function Reports() {
           expired: 0,
         }
         cur.required += 1
-        if (it.status !== 'missing' && it.status !== 'unknown') cur.held += 1
-        if (it.status === 'satisfied' || it.status === 'in_transition') cur.valid += 1
+        if (it.actualHoldingIds.length > 0) cur.held += 1
+        if (it.status === 'satisfied') cur.valid += 1
         if (it.warningLevel && it.status === 'satisfied') cur.expiring += 1
         if (it.status === 'expired') cur.expired += 1
         map.set(it.certificateId, cur)
@@ -58,7 +58,7 @@ export function Reports() {
   }, [calc.personResults, db.certificates])
 
   const jobRows = useMemo(() => {
-    const map = new Map<string, { org: string; major: string; job: string; people: number; certs: string; held: number; missing: number; rate: number | null }>()
+    const map = new Map<string, { org: string; major: string; job: string; people: number; certs: string; held: number; missing: number; risk: number; rate: number | null }>()
     for (const r of calc.personResults) {
       const asg = assignmentsAt(db, r.personId, db.asOfDate).find((a) => a.kind === 'primary') ?? assignmentsAt(db, r.personId, db.asOfDate)[0]
       if (!asg) continue
@@ -72,12 +72,14 @@ export function Reports() {
         certs: [...new Set(r.requiredItems.filter((i) => !i.incentive).map((i) => i.certificateName))].join('、') || '—',
         held: 0,
         missing: 0,
+        risk: 0,
         rate: null,
       }
       cur.people += 1
       if (r.judgement === 'compliant') cur.held += 1
       if (r.judgement === 'noncompliant') cur.missing += 1
-      const decidable = cur.held + cur.missing
+      if (r.judgement === 'at_risk') cur.risk += 1
+      const decidable = cur.held + cur.missing + cur.risk
       cur.rate = decidable ? cur.held / decidable : null
       map.set(key, cur)
     }
@@ -164,7 +166,7 @@ export function Reports() {
             <tbody>
               {certRows.map((r) => (
                 <tr key={r.name}>
-                  <td>{r.category}</td>
+                  <td>{CERT_CAT[r.category] ?? r.category}</td>
                   <td>{r.name}</td>
                   <td>{r.required}</td>
                   <td>{r.held}</td>
@@ -191,6 +193,7 @@ export function Reports() {
                 <th>应持证书</th>
                 <th>合规</th>
                 <th>不合规</th>
+                <th>过渡期/风险</th>
                 <th>人员合规率</th>
               </tr>
             </thead>
@@ -204,6 +207,7 @@ export function Reports() {
                   <td className="max-w-xs truncate">{r.certs}</td>
                   <td>{r.held}</td>
                   <td>{r.missing}</td>
+                  <td>{r.risk}</td>
                   <td>{pct(r.rate)}</td>
                 </tr>
               ))}
@@ -247,9 +251,7 @@ export function Reports() {
                     <td>{job}</td>
                     <td>{scopes || '—'}</td>
                     <td>{i.certificateName}</td>
-                    <td>
-                      {i.ruleName} v{i.ruleVersion}
-                    </td>
+                    <td>{(i.sources ?? [{ ruleName: i.ruleName, ruleVersion: i.ruleVersion }]).map((s) => `${s.ruleName} v${s.ruleVersion}`).join('；')}</td>
                     <td>{iss ? ISSUE_STATUS[iss.status] : '—'}</td>
                   </tr>
                 )

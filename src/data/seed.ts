@@ -14,6 +14,7 @@ import { calculateAll } from '../engine/calculate'
 import { suggest } from '../engine/standardize'
 import positions from './positions.json'
 import { classifyPosition, isHvCategory, shouldLeaveUnmapped, type PositionRow } from './positions'
+import { buildPolicyCertificates } from './policy'
 
 const WARN: WarningScheme = {
   expiryEnabled: true,
@@ -244,6 +245,20 @@ export function buildSeed(): DB {
       effectiveTo: null,
     })
   }
+  if (!jobs.some((j) => j.name === '起重指挥（兼岗）')) {
+    jobs.push({
+      id: 'job_std_crane_commander',
+      name: '起重指挥（兼岗）',
+      major: '起重',
+      category: '起重作业',
+      sequence: '技能',
+      isProduction: true,
+      tags: ['起重'],
+      status: 'active',
+      effectiveFrom: '2020-01-01',
+      effectiveTo: null,
+    })
+  }
 
   const workScopeTags = [
     { id: 'ws_hv', name: '高压电气作业', group: '电气' },
@@ -260,20 +275,24 @@ export function buildSeed(): DB {
     { id: 'ws_se', name: '特种设备安全管理', group: '安监' },
     { id: 'ws_safety', name: '专职安全监督', group: '安监' },
     { id: 'ws_tech', name: '技术监督专责', group: '监督' },
+    { id: 'ws_welding', name: '熔化焊接与热切割作业', group: '焊接' },
+    { id: 'ws_height_scaffold', name: '登高架设作业', group: '高处' },
+    { id: 'ws_elevator', name: '电梯修理', group: '特种设备' },
+    { id: 'ws_pressure_door', name: '快开门式压力容器操作', group: '特种设备' },
+    { id: 'ws_pressure_fill', name: '移动式压力容器充装', group: '特种设备' },
+    { id: 'ws_safety_valve', name: '安全阀校验', group: '特种设备' },
+    { id: 'ws_se_welding', name: '特种设备焊接', group: '特种设备' },
+    { id: 'ws_fire', name: '自动消防系统操作', group: '消防' },
+    { id: 'ws_fuel_lab', name: '燃料采制化及化验', group: '燃料' },
+    { id: 'ws_water_treatment', name: '水处理值班', group: '化学' },
+    { id: 'ws_water_coal_oil_lab', name: '水煤油化验', group: '化学' },
+    { id: 'ws_dispatch', name: '电网调度运行', group: '运行' },
+    { id: 'ws_legal', name: '专职法务', group: '法律' },
+    { id: 'ws_accounting_manager', name: '财务负责人或主管', group: '财务' },
+    { id: 'ws_accounting_general', name: '财务一般管理', group: '财务' },
   ]
 
-  const certificates = [
-    { id: 'cert_hv', name: '高压电工作业证', category: 'national' as const, subCategory: '特种作业', series: 'electrical', grade: null, gradeOrder: null, hasExpiry: true, needsReview: true, warning: WARN, status: 'active' as const },
-    { id: 'cert_lv', name: '低压电工作业证', category: 'national' as const, subCategory: '特种作业', series: 'electrical_lv', grade: null, gradeOrder: null, hasExpiry: true, needsReview: true, warning: WARN, status: 'active' as const },
-    { id: 'cert_height', name: '高处作业证', category: 'national' as const, subCategory: '特种作业', series: 'height', grade: null, gradeOrder: null, hasExpiry: true, needsReview: true, warning: WARN, status: 'active' as const },
-    { id: 'cert_crane_c', name: '起重指挥证', category: 'national' as const, subCategory: '特种作业', series: 'crane', grade: null, gradeOrder: null, hasExpiry: true, needsReview: true, warning: WARN, status: 'active' as const },
-    { id: 'cert_fork', name: '叉车操作证', category: 'national' as const, subCategory: '特种作业', series: 'fork', grade: null, gradeOrder: null, hasExpiry: true, needsReview: true, warning: WARN, status: 'active' as const },
-    { id: 'cert_cse', name: '注册安全工程师证', category: 'group' as const, subCategory: '执业资格', series: 'cse', grade: '中级', gradeOrder: 2, hasExpiry: true, needsReview: true, warning: WARN, status: 'active' as const },
-    { id: 'cert_cse_h', name: '注册安全工程师证（高级）', category: 'group' as const, subCategory: '执业资格', series: 'cse', grade: '高级', gradeOrder: 3, hasExpiry: true, needsReview: true, warning: WARN, status: 'active' as const },
-    { id: 'cert_se', name: '特种设备安全管理证', category: 'group' as const, subCategory: '特种设备', series: 'se_mgmt', grade: null, gradeOrder: null, hasExpiry: true, needsReview: true, warning: WARN, status: 'active' as const },
-    { id: 'cert_eng_m', name: '中级工程师职称', category: 'incentive' as const, subCategory: '职称', series: 'engineer', grade: '中级', gradeOrder: 2, hasExpiry: false, needsReview: false, warning: { ...WARN, expiryEnabled: false }, status: 'active' as const },
-    { id: 'cert_eng_h', name: '高级工程师职称', category: 'incentive' as const, subCategory: '职称', series: 'engineer', grade: '高级', gradeOrder: 3, hasExpiry: false, needsReview: false, warning: { ...WARN, expiryEnabled: false }, status: 'active' as const },
-  ]
+  const certificates = buildPolicyCertificates(WARN)
 
   const people: Person[] = []
   const assignments: Assignment[] = []
@@ -323,8 +342,8 @@ export function buildSeed(): DB {
         orgId,
         originalOrgName: p.t || p.d,
         originalJobName: '起重指挥（兼岗）',
-        standardJobId: stdId,
-        jobStdStatus: stdId ? 'mapped' : 'unmapped',
+        standardJobId: 'job_std_crane_commander',
+        jobStdStatus: 'mapped',
         kind: 'concurrent',
         startDate: '2020-01-01',
         endDate: null,
@@ -338,6 +357,7 @@ export function buildSeed(): DB {
       if (isHvCategory(cls.category)) tags.push('ws_hv')
       if (cls.category === '安全管理') tags.push('ws_safety')
       if (/焊工/.test(p.j)) tags.push('ws_height')
+      if (cls.category === '焊接检修') tags.push('ws_welding')
       if (/起重/.test(p.j) || demoId === DEMO.concurrent) tags.push('ws_crane_c')
       tags.forEach((tagId, k) => {
         personWorkScopes.push({
@@ -403,6 +423,7 @@ export function buildSeed(): DB {
     }
     if (/焊工/.test(p.j) && demoId !== DEMO.unmappedJob) {
       hold(`h_${personId}_ht`, 'cert_height', '高处作业证', true, '2021-01-01', '2028-01-01', '2027-01-01')
+      hold(`h_${personId}_weld`, 'cert_welding', '焊接与热切割作业证', true, '2021-01-01', '2028-01-01', '2027-01-01')
     }
     if (cls.isProduction && i % 11 === 0 && demoId !== DEMO.unmappedJob) {
       hold(`h_${personId}_eng`, 'cert_eng_m', '中级工程师职称', true, '2018-01-01', null, null, false)
@@ -532,7 +553,13 @@ export function buildSeed(): DB {
       version: 1,
       familyId: 'fam_lv',
       status: 'active',
-      condition: { logic: 'AND', conditions: [{ field: 'work_scope', operator: 'CONTAINS', value: '低压电气作业' }] },
+      condition: {
+        logic: 'AND',
+        conditions: [
+          { field: 'job_category', operator: 'IN', value: ['电气检修', '电气运行', '集控运行'] },
+          { field: 'work_scope', operator: 'CONTAINS', value: '低压电气作业' },
+        ],
+      },
       requirement: { logic: 'AND', items: [{ certificateId: 'cert_lv' }] },
       effectiveFrom: '2025-01-01',
       effectiveTo: null,
@@ -549,13 +576,157 @@ export function buildSeed(): DB {
       version: 1,
       familyId: 'fam_ht',
       status: 'active',
-      condition: { logic: 'AND', conditions: [{ field: 'work_scope', operator: 'CONTAINS', value: '高处作业' }] },
+      condition: {
+        logic: 'AND',
+        conditions: [
+          { field: 'job_category', operator: 'IN', value: ['焊接检修'] },
+          { field: 'work_scope', operator: 'CONTAINS', value: '高处作业' },
+        ],
+      },
       requirement: { logic: 'AND', items: [{ certificateId: 'cert_height' }] },
       effectiveFrom: '2025-01-01',
       effectiveTo: null,
       createdBy: 'u_spec',
       reviewedBy: 'u_hr',
       notes: '',
+    },
+    {
+      id: 'rule_cable',
+      code: 'R-CABLE',
+      name: '电力电缆作业强制持证',
+      type: 'personal_mandatory',
+      certCategory: 'national',
+      version: 1,
+      familyId: 'fam_cable',
+      status: 'active',
+      condition: {
+        logic: 'AND',
+        conditions: [
+          { field: 'job_category', operator: 'IN', value: ['电气检修', '电气运行'] },
+          { field: 'work_scope', operator: 'IN', value: ['电力电缆作业'] },
+        ],
+      },
+      requirement: { logic: 'AND', items: [{ certificateId: 'cert_cable' }] },
+      effectiveFrom: '2025-01-01',
+      effectiveTo: null,
+      createdBy: 'u_spec',
+      reviewedBy: 'u_hr',
+      notes: '依据附件2；必须由已确认作业范围触发。',
+    },
+    {
+      id: 'rule_relay',
+      code: 'R-RELAY',
+      name: '继电保护作业强制持证',
+      type: 'personal_mandatory',
+      certCategory: 'national',
+      version: 1,
+      familyId: 'fam_relay',
+      status: 'active',
+      condition: {
+        logic: 'AND',
+        conditions: [
+          { field: 'job_category', operator: 'IN', value: ['电气检修', '电气运行'] },
+          { field: 'work_scope', operator: 'IN', value: ['继电保护作业'] },
+        ],
+      },
+      requirement: { logic: 'AND', items: [{ certificateId: 'cert_relay' }] },
+      effectiveFrom: '2025-01-01',
+      effectiveTo: null,
+      createdBy: 'u_spec',
+      reviewedBy: 'u_hr',
+      notes: '依据附件2；必须由已确认作业范围触发。',
+    },
+    {
+      id: 'rule_electrical_test',
+      code: 'R-ELEC-TEST',
+      name: '电气试验作业强制持证',
+      type: 'personal_mandatory',
+      certCategory: 'national',
+      version: 1,
+      familyId: 'fam_electrical_test',
+      status: 'active',
+      condition: {
+        logic: 'AND',
+        conditions: [
+          { field: 'job_category', operator: 'IN', value: ['电气检修', '电气运行'] },
+          { field: 'work_scope', operator: 'IN', value: ['电气试验'] },
+        ],
+      },
+      requirement: { logic: 'AND', items: [{ certificateId: 'cert_electrical_test' }] },
+      effectiveFrom: '2025-01-01',
+      effectiveTo: null,
+      createdBy: 'u_spec',
+      reviewedBy: 'u_hr',
+      notes: '依据附件2；必须由已确认作业范围触发。',
+    },
+    {
+      id: 'rule_welding',
+      code: 'R-WELD',
+      name: '焊接与热切割作业强制持证',
+      type: 'personal_mandatory',
+      certCategory: 'national',
+      version: 1,
+      familyId: 'fam_welding',
+      status: 'active',
+      condition: {
+        logic: 'AND',
+        conditions: [
+          { field: 'job_category', operator: 'IN', value: ['焊接检修'] },
+          { field: 'work_scope', operator: 'IN', value: ['熔化焊接与热切割作业'] },
+        ],
+      },
+      requirement: { logic: 'AND', items: [{ certificateId: 'cert_welding' }] },
+      effectiveFrom: '2025-01-01',
+      effectiveTo: null,
+      createdBy: 'u_spec',
+      reviewedBy: 'u_hr',
+      notes: '依据附件2；焊工岗位名称只用于缩小候选范围，正式结论仍依赖人工确认的作业范围。',
+    },
+    {
+      id: 'rule_forklift',
+      code: 'R-FORK',
+      name: '叉车作业强制持证',
+      type: 'personal_mandatory',
+      certCategory: 'national',
+      version: 1,
+      familyId: 'fam_forklift',
+      status: 'active',
+      condition: {
+        logic: 'AND',
+        conditions: [
+          { field: 'job_category', operator: 'IN', value: ['厂内车辆作业'] },
+          { field: 'work_scope', operator: 'IN', value: ['叉车操作'] },
+        ],
+      },
+      requirement: { logic: 'AND', items: [{ certificateId: 'cert_fork' }] },
+      effectiveFrom: '2025-01-01',
+      effectiveTo: null,
+      createdBy: 'u_spec',
+      reviewedBy: 'u_hr',
+      notes: '依据附件2。',
+    },
+    {
+      id: 'rule_fire',
+      code: 'R-FIRE',
+      name: '消防设施操作岗位强制持证',
+      type: 'personal_mandatory',
+      certCategory: 'national',
+      version: 1,
+      familyId: 'fam_fire',
+      status: 'active',
+      condition: {
+        logic: 'AND',
+        conditions: [
+          { field: 'job_category', operator: 'IN', value: ['消防设施操作'] },
+          { field: 'work_scope', operator: 'IN', value: ['自动消防系统操作'] },
+        ],
+      },
+      requirement: { logic: 'AND', items: [{ certificateId: 'cert_fire' }] },
+      effectiveFrom: '2025-01-01',
+      effectiveTo: null,
+      createdBy: 'u_spec',
+      reviewedBy: 'u_hr',
+      notes: '依据附件2。',
     },
     {
       id: 'rule_crane',
@@ -566,7 +737,13 @@ export function buildSeed(): DB {
       version: 1,
       familyId: 'fam_cr',
       status: 'active',
-      condition: { logic: 'AND', conditions: [{ field: 'work_scope', operator: 'CONTAINS', value: '起重指挥' }] },
+      condition: {
+        logic: 'AND',
+        conditions: [
+          { field: 'job_category', operator: 'IN', value: ['起重作业'] },
+          { field: 'work_scope', operator: 'CONTAINS', value: '起重指挥' },
+        ],
+      },
       requirement: { logic: 'AND', items: [{ certificateId: 'cert_crane_c' }] },
       effectiveFrom: '2025-01-01',
       effectiveTo: null,
@@ -579,12 +756,12 @@ export function buildSeed(): DB {
       code: 'R-CSE',
       name: '专职安全监督注册安全工程师持证率',
       type: 'group_ratio',
-      certCategory: 'group',
+      certCategory: 'national',
       version: 1,
       familyId: 'fam_cse',
       status: 'active',
       condition: { logic: 'AND', conditions: [{ field: 'job_category', operator: 'IN', value: ['安全管理'] }] },
-      requirement: { logic: 'AND', items: [{ certificateId: 'cert_cse', minGradeOrder: 2 }] },
+      requirement: { logic: 'AND', items: [{ certificateId: 'cert_cse' }] },
       stages: [
         { until: '2026-12-31', target: 0.5, label: '2026年底 ≥50%' },
         { until: '2028-12-31', target: 0.75, label: '2028年底 ≥75%' },
@@ -599,26 +776,26 @@ export function buildSeed(): DB {
     {
       id: 'rule_new',
       code: 'R-NEW',
-      name: '新上岗高压作业过渡期',
+      name: '2027年起新上岗高压作业准入',
       type: 'new_post',
       certCategory: 'national',
       version: 1,
       familyId: 'fam_new',
-      status: 'active',
+      status: 'pending_effective',
       condition: {
         logic: 'AND',
         conditions: [
           { field: 'job_category', operator: 'IN', value: ['电气检修', '电气运行', '集控运行'] },
           { field: 'work_scope', operator: 'CONTAINS', value: '高压电气作业' },
+          { field: 'assignment_start', operator: 'AFTER', value: '2026-12-31' },
         ],
       },
       requirement: { logic: 'AND', items: [{ certificateId: 'cert_hv' }] },
-      transitionDays: 90,
-      effectiveFrom: '2025-01-01',
+      effectiveFrom: '2027-01-01',
       effectiveTo: null,
       createdBy: 'u_spec',
       reviewedBy: 'u_hr',
-      notes: '新上岗以任职/作业开始日期计算，不以入职日期计算。',
+      notes: '依据指导意见：自2027年1月1日起，新上岗人员必须持证后方可上岗，不设置取证宽限期。新上岗以相关岗位任职/作业开始日期判断，不以入职日期判断。',
     },
     {
       id: 'rule_inc',
@@ -639,38 +816,89 @@ export function buildSeed(): DB {
     },
     {
       id: 'rule_cable_draft',
-      code: 'R-CAB',
-      name: '电力电缆作业持证（草稿）',
+      code: 'R-CABLE',
+      name: '电力电缆作业强制持证',
       type: 'personal_mandatory',
       certCategory: 'national',
-      version: 1,
-      familyId: 'fam_cab',
+      version: 2,
+      familyId: 'fam_cable',
       status: 'pending_review',
-      condition: { logic: 'AND', conditions: [{ field: 'work_scope', operator: 'CONTAINS', value: '电力电缆作业' }] },
-      requirement: { logic: 'AND', items: [{ certificateId: 'cert_hv' }] },
+      condition: {
+        logic: 'AND',
+        conditions: [
+          { field: 'job_category', operator: 'IN', value: ['电气检修', '电气运行', '集控运行'] },
+          { field: 'work_scope', operator: 'IN', value: ['电力电缆作业'] },
+        ],
+      },
+      requirement: { logic: 'AND', items: [{ certificateId: 'cert_cable' }] },
       effectiveFrom: '2026-10-01',
       effectiveTo: null,
       createdBy: 'u_spec',
       submittedBy: 'u_spec',
       submittedAt: '2026-09-01T02:00:00.000Z',
-      notes: '待 HR 审核发布。',
+      notes: '待 HR 审核发布的 v2：拟将集控运行岗位纳入候选范围，仍须以已确认作业范围触发。',
+      supersedesId: 'rule_cable',
     },
     {
       id: 'rule_cse_conflict',
       code: 'R-CSE-X',
       name: '专职安全监督持证率（冲突草稿）',
       type: 'group_ratio',
-      certCategory: 'group',
+      certCategory: 'national',
       version: 1,
       familyId: 'fam_cse_x',
       status: 'draft',
       condition: { logic: 'AND', conditions: [{ field: 'job_category', operator: 'IN', value: ['安全管理'] }] },
-      requirement: { logic: 'AND', items: [{ certificateId: 'cert_cse', minGradeOrder: 2 }] },
+      requirement: { logic: 'AND', items: [{ certificateId: 'cert_cse' }] },
       stages: [{ until: '2026-12-31', target: 1, label: '2026年底 =100%' }],
       effectiveFrom: '2026-01-01',
       effectiveTo: null,
       createdBy: 'u_spec',
       notes: '与现行 R-CSE 阶段目标冲突，发布前应被阻止。',
+    },
+    {
+      id: 'rule_legal_body',
+      code: 'R-LEGAL-BODY',
+      name: '专职法务法律职业资格持证率（正文口径候选）',
+      type: 'group_ratio',
+      certCategory: 'national',
+      version: 1,
+      familyId: 'fam_legal_body',
+      status: 'pending_review',
+      condition: { logic: 'AND', conditions: [{ field: 'duty_tag', operator: 'IN', value: ['专职法务'] }] },
+      requirement: { logic: 'AND', items: [{ certificateId: 'cert_legal' }] },
+      stages: [
+        { until: '2027-12-31', target: 0.8, label: '正文：2027年底 ≥80%' },
+        { until: '9999-12-31', target: 1, label: '正文：2028年底 =100%' },
+      ],
+      effectiveFrom: '2027-01-01',
+      effectiveTo: null,
+      createdBy: 'u_spec',
+      submittedBy: 'u_spec',
+      submittedAt: '2026-09-01T02:30:00.000Z',
+      notes: '正文与附件2对80%节点分别写为2027年底和2026年底。未获企业确认前不得发布。',
+    },
+    {
+      id: 'rule_legal_annex',
+      code: 'R-LEGAL-ANNEX',
+      name: '专职法务法律职业资格持证率（附件口径候选）',
+      type: 'group_ratio',
+      certCategory: 'national',
+      version: 1,
+      familyId: 'fam_legal_annex',
+      status: 'pending_review',
+      condition: { logic: 'AND', conditions: [{ field: 'duty_tag', operator: 'IN', value: ['专职法务'] }] },
+      requirement: { logic: 'AND', items: [{ certificateId: 'cert_legal' }] },
+      stages: [
+        { until: '2026-12-31', target: 0.8, label: '附件2：2026年底 ≥80%' },
+        { until: '9999-12-31', target: 1, label: '附件2：2028年底 =100%' },
+      ],
+      effectiveFrom: '2026-01-01',
+      effectiveTo: null,
+      createdBy: 'u_spec',
+      submittedBy: 'u_spec',
+      submittedAt: '2026-09-01T02:31:00.000Z',
+      notes: '制度冲突候选，不自动裁决；需与正文口径一并提交企业确认。',
     },
   ]
 
@@ -684,7 +912,7 @@ export function buildSeed(): DB {
   ]
 
   const db: DB = {
-    version: 2,
+    version: 5,
     asOfDate: AS_OF,
     currentUserId: 'u_admin',
     users,

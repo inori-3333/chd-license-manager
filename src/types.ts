@@ -43,10 +43,12 @@ export type ConditionField =
 export type Operator = 'EQ' | 'NE' | 'IN' | 'NOT_IN' | 'CONTAINS' | 'BEFORE' | 'AFTER'
 export type ImportRowKind = 'person' | 'certificate' | 'work_scope'
 export type ImportRowStatus = 'rejected' | 'pending_std' | 'standardized'
-export type PersonJudgement = 'compliant' | 'noncompliant' | 'undecidable' | 'out_of_scope'
+export type PersonJudgement = 'compliant' | 'noncompliant' | 'at_risk' | 'undecidable' | 'out_of_scope'
 export type RequiredItemStatus =
   | 'satisfied'
   | 'missing'
+  | 'not_yet_valid'
+  | 'registration_invalid'
   | 'expired'
   | 'review_overdue'
   | 'grade_insufficient'
@@ -151,6 +153,9 @@ export interface StandardCert {
   needsReview: boolean
   warning: WarningScheme
   status: 'active' | 'inactive'
+  policyBasis?: string
+  applicableScope?: string
+  ratioRequirement?: string
 }
 
 export interface CertHolding {
@@ -260,6 +265,7 @@ export interface RequiredItem {
   explanation: string
   daysLeft?: number
   warningLevel?: WarningLevel
+  sources?: Array<{ ruleId: string; ruleName: string; ruleVersion: number }>
 }
 
 export interface PersonResult {

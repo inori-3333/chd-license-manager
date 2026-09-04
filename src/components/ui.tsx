@@ -106,7 +106,7 @@ export function Empty({ children }: { children: ReactNode }) {
 export function judgeTone(j: string): 'green' | 'red' | 'amber' | 'slate' {
   if (j === 'compliant') return 'green'
   if (j === 'noncompliant') return 'red'
-  if (j === 'undecidable') return 'amber'
+  if (j === 'undecidable' || j === 'at_risk') return 'amber'
   return 'slate'
 }
 

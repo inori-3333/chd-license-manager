@@ -201,6 +201,11 @@ function PersonDetail({ personId, onClose }: { personId: string; onClose: () => 
                 </Badge>
               </div>
               <div className="mt-1 text-xs text-slate-500">{i.explanation}</div>
+              {i.sources && i.sources.length > 1 ? (
+                <div className="mt-1 text-[11px] text-slate-400">
+                  合并触发来源：{i.sources.map((s) => `${s.ruleName} v${s.ruleVersion}`).join('；')}
+                </div>
+              ) : null}
             </div>
           ))}
           <div className="mt-2 rounded-lg bg-slate-50 p-2 text-xs leading-5 text-slate-600">
@@ -218,5 +223,4 @@ function PersonDetail({ personId, onClose }: { personId: string; onClose: () => 
     </Modal>
   )
 }
-
 
