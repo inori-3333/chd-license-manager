@@ -1,114 +1,186 @@
-import { NavLink, Outlet } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
-  LayoutDashboard,
+  BarChart3,
+  BookOpenCheck,
   Building2,
-  Upload,
-  SpellCheck,
-  Users,
-  Scale,
-  TriangleAlert,
+  CalendarDays,
+  ChevronDown,
+  LayoutDashboard,
   ListChecks,
-  Table2,
+  Menu,
   RefreshCw,
   RotateCcw,
-  BookOpenCheck,
+  Scale,
+  ShieldCheck,
+  SpellCheck,
+  Table2,
+  TriangleAlert,
+  Upload,
+  Users,
+  X,
 } from 'lucide-react'
 import { currentUser, recalc, resetDemo, setAsOf, setUser, useDb } from '../store'
 import { ROLE_LABEL } from '../format'
-import { useState } from 'react'
+import { Button, Modal } from './ui'
 
 const NAV = [
-  { to: '/', label: '管理驾驶舱', icon: LayoutDashboard },
-  { to: '/workbench', label: '基层工作台', icon: Building2 },
-  { to: '/import', label: '数据导入', icon: Upload },
-  { to: '/standardize', label: '名称标准化', icon: SpellCheck },
-  { to: '/personnel', label: '人员持证', icon: Users },
-  { to: '/policy-standards', label: '制度标准', icon: BookOpenCheck },
-  { to: '/rules', label: '规则中心', icon: Scale },
-  { to: '/issues', label: '问题中心', icon: TriangleAlert },
-  { to: '/remediation', label: '整改闭环', icon: ListChecks },
-  { to: '/reports', label: '统计报表', icon: Table2 },
+  {
+    label: '总览',
+    items: [
+      { to: '/', label: '管理驾驶舱', icon: LayoutDashboard },
+      { to: '/workbench', label: '基层工作台', icon: Building2 },
+    ],
+  },
+  {
+    label: '数据治理',
+    items: [
+      { to: '/import', label: '数据导入', icon: Upload },
+      { to: '/standardize', label: '名称标准化', icon: SpellCheck },
+      { to: '/personnel', label: '人员持证', icon: Users },
+    ],
+  },
+  {
+    label: '规则与处置',
+    items: [
+      { to: '/policy-standards', label: '制度标准', icon: BookOpenCheck },
+      { to: '/rules', label: '规则中心', icon: Scale },
+      { to: '/issues', label: '问题中心', icon: TriangleAlert },
+      { to: '/remediation', label: '整改闭环', icon: ListChecks },
+    ],
+  },
+  {
+    label: '分析',
+    items: [{ to: '/reports', label: '统计报表', icon: Table2 }],
+  },
 ]
+
+const FLAT_NAV = NAV.flatMap((group) => group.items)
 
 export function Layout() {
   const db = useDb()
   const user = currentUser(db)
+  const location = useLocation()
   const [welcome, setWelcome] = useState(() => !sessionStorage.getItem('chd.welcome'))
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [resetOpen, setResetOpen] = useState(false)
+  const currentPage = useMemo(
+    () => FLAT_NAV.find((item) => item.to === location.pathname) ?? FLAT_NAV[0],
+    [location.pathname],
+  )
+
+  useEffect(() => setMobileNavOpen(false), [location.pathname])
+  useEffect(() => {
+    document.title = `${currentPage.label} — 持证上岗统计分析`
+  }, [currentPage.label])
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
-        <div className="flex items-center gap-3 px-4 py-5">
-          <div className="brand-mark">证</div>
-          <div>
-            <div className="text-sm font-semibold text-white">持证上岗统计分析</div>
-            <div className="text-[11px] text-teal-200/80">人岗证治理 · 规则计算 · 闭环</div>
+      {mobileNavOpen ? <button className="sidebar-scrim" aria-label="关闭导航" onClick={() => setMobileNavOpen(false)} /> : null}
+      <aside className={`sidebar ${mobileNavOpen ? 'is-open' : ''}`}>
+        <div className="brand-lockup">
+          <div className="brand-mark" aria-hidden="true">
+            <ShieldCheck size={20} strokeWidth={2} />
           </div>
+          <div className="min-w-0">
+            <div className="brand-name">持证上岗</div>
+            <div className="brand-subtitle">统计分析系统</div>
+          </div>
+          <button className="sidebar-close" aria-label="关闭导航" onClick={() => setMobileNavOpen(false)}>
+            <X size={18} />
+          </button>
         </div>
-        <nav className="flex-1 space-y-1 px-3">
-          {NAV.map((n) => (
-            <NavLink key={n.to} to={n.to} end={n.to === '/'} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-              <n.icon size={16} />
-              {n.label}
-            </NavLink>
+
+        <nav className="sidebar-nav" aria-label="主导航">
+          {NAV.map((group) => (
+            <div className="nav-group" key={group.label}>
+              <div className="nav-group-label">{group.label}</div>
+              <div className="nav-group-items">
+                {group.items.map((item) => (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.to === '/'}
+                    className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+                  >
+                    <item.icon size={17} strokeWidth={1.9} />
+                    <span>{item.label}</span>
+                  </NavLink>
+                ))}
+              </div>
+            </div>
           ))}
         </nav>
-        <div className="m-3 rounded-lg border border-white/10 bg-white/5 p-3 text-[11px] leading-relaxed text-slate-300">
-          宁可标记「未知、待确认、数据不足」，也不得根据不充分信息自行推断正式合规结论。
-        </div>
+
       </aside>
-      <div className="flex min-w-0 flex-col">
+
+      <div className="app-content">
         <header className="topbar">
-          <div className="text-sm text-slate-500">
-            统计时点
-            <input
-              className="input ml-2"
-              type="date"
-              value={db.asOfDate}
-              onChange={(e) => setAsOf(e.target.value)}
-            />
-            {db.lastCalcAt ? <span className="ml-3 text-xs">最近重算 {db.lastCalcAt.replace('T', ' ').slice(0, 16)}</span> : null}
+          <div className="topbar-title">
+            <button className="mobile-menu" aria-label="打开导航" onClick={() => setMobileNavOpen(true)}>
+              <Menu size={19} />
+            </button>
+            <div className="page-icon" aria-hidden="true">
+              <currentPage.icon size={16} strokeWidth={2} />
+            </div>
+            <span>{currentPage.label}</span>
           </div>
-          <div className="flex items-center gap-2">
-            <select className="select" value={user.id} onChange={(e) => setUser(e.target.value)}>
-              {db.users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name} · {ROLE_LABEL[u.role]}
-                </option>
-              ))}
-            </select>
-            <button className="btn btn-ghost" onClick={() => recalc('手动重算')}>
-              <RefreshCw size={14} /> 重算
+
+          <div className="topbar-actions">
+            <label className="date-control">
+              <CalendarDays size={15} aria-hidden="true" />
+              <span>统计时点</span>
+              <input aria-label="统计时点" type="date" value={db.asOfDate} onChange={(e) => setAsOf(e.target.value)} />
+            </label>
+            <button className="icon-button" title="重新计算" aria-label="重新计算" onClick={() => recalc('手动重算')}>
+              <RefreshCw size={16} />
             </button>
             <button
-              className="btn btn-ghost"
-              onClick={() => {
-                if (confirm('将清除本机演示改动并恢复种子数据？')) resetDemo()
-              }}
+              className="icon-button desktop-only"
+              title="重置演示数据"
+              aria-label="重置演示数据"
+              onClick={() => setResetOpen(true)}
             >
-              <RotateCcw size={14} /> 重置演示
+              <RotateCcw size={16} />
             </button>
+            <label className="user-control">
+              <span className="user-avatar">{user.name.slice(0, 1)}</span>
+              <span className="user-copy">
+                <strong>{user.name}</strong>
+                <small>{ROLE_LABEL[user.role]}</small>
+              </span>
+              <select aria-label="切换用户" value={user.id} onChange={(e) => setUser(e.target.value)}>
+                {db.users.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name} · {ROLE_LABEL[item.role]}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown size={14} aria-hidden="true" />
+            </label>
           </div>
         </header>
+
         <main className="page min-w-0 flex-1 overflow-auto">
-          <Outlet />
+          <div className="page-transition" key={location.pathname}>
+            <Outlet />
+          </div>
         </main>
       </div>
+
       {welcome ? (
         <div className="modal-backdrop">
-          <div className="modal p-6">
-            <div className="mb-2 text-lg font-semibold">持证上岗统计分析系统 · 可演示 MVP</div>
-            <p className="text-sm leading-6 text-slate-600">
-              这不是证书台账电子化，而是一条可体验的闭环：数据接入 → 名称治理 → 作业范围确认 → 已发布规则版本 →
-              三值规则计算 → 质量/预警/合规三类问题 → 整改复核销项 → 驾驶舱三项口径。
-            </p>
-            <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-600">
-              <li>人员岗位来自《岗位示例表》1315 条真实组织岗位；证书与作业范围按专业规则叠加，用于演示闭环。</li>
-              <li>数据保存在本机浏览器，可随时重置。</li>
-              <li>名称推荐使用可降级本地算法，AI 不参与合规裁决，推荐必须人工确认。</li>
-              <li>请用右上角切换角色走完：管理员确认「电修技术员 / 注安师 / 生技部」→ 基层补作业范围 → HR 审规则 → 整改复核。</li>
-            </ul>
-            <div className="mt-5 flex justify-end">
+          <div className="modal welcome-modal" role="dialog" aria-modal="true" aria-label="欢迎使用">
+            <div className="welcome-icon"><BarChart3 size={24} /></div>
+            <div className="welcome-kicker">欢迎使用</div>
+            <h2>把持证治理，变成清晰的闭环</h2>
+            <p className="welcome-lead">串联数据接入、名称治理、规则计算与整改销项。</p>
+            <div className="welcome-steps">
+              <div><span>01</span><strong>汇入数据</strong><small>人员、岗位和证书统一治理</small></div>
+              <div><span>02</span><strong>计算判定</strong><small>以已发布规则完成三值计算</small></div>
+              <div><span>03</span><strong>闭环整改</strong><small>问题、复核和销项全程留痕</small></div>
+            </div>
+            <div className="welcome-actions">
               <button
                 className="btn btn-primary"
                 onClick={() => {
@@ -116,11 +188,29 @@ export function Layout() {
                   setWelcome(false)
                 }}
               >
-                开始体验
+                进入工作台
               </button>
             </div>
           </div>
         </div>
+      ) : null}
+
+      {resetOpen ? (
+        <Modal title="重置演示数据" onClose={() => setResetOpen(false)}>
+          <p className="mb-5 text-sm leading-6 text-slate-600">重置后恢复种子数据，并清除当前浏览器中的演示改动。</p>
+          <div className="flex justify-end gap-2">
+            <Button onClick={() => setResetOpen(false)}>取消</Button>
+            <Button
+              kind="danger"
+              onClick={() => {
+                resetDemo()
+                setResetOpen(false)
+              }}
+            >
+              确认重置
+            </Button>
+          </div>
+        </Modal>
       ) : null}
     </div>
   )

@@ -7,3 +7,6 @@ dist-ssr
 coverage
 .idea
 .vscode
+.audit-before/
+.audit-after/
+.audit-focus/

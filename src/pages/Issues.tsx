@@ -1,21 +1,21 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Badge, Button, Card, Modal, Pager, PAGE_SIZE, issueTone } from '../components/ui'
+import { Badge, Button, Card, Empty, FocusTabs, Modal, Pager, PAGE_SIZE, PageHeader, SearchField, issueTone } from '../components/ui'
 import { can, issueInScope, startRemediation, useDb } from '../store'
 import { ISSUE_CLASS, ISSUE_STATUS } from '../format'
 import { orgPath } from '../engine/org'
 import type { Issue, IssueClass } from '../types'
 
 const TABS: Array<{ id: IssueClass | 'all'; label: string }> = [
-  { id: 'all', label: '全部' },
-  { id: 'data_quality', label: '数据质量' },
-  { id: 'risk', label: '风险预警' },
   { id: 'compliance', label: '合规问题' },
+  { id: 'risk', label: '风险预警' },
+  { id: 'data_quality', label: '数据质量' },
+  { id: 'all', label: '全部' },
 ]
 
 export function Issues() {
   const db = useDb()
-  const [tab, setTab] = useState<IssueClass | 'all'>('all')
+  const [tab, setTab] = useState<IssueClass | 'all'>('compliance')
   const [q, setQ] = useState('')
   const [page, setPage] = useState(1)
   const [sel, setSel] = useState<Issue | null>(null)
@@ -24,7 +24,7 @@ export function Issues() {
 
   const rows = useMemo(() => {
     return scoped.filter((i) => {
-      if (i.status === 'closed' && tab !== 'all') return false
+      if (i.status === 'closed') return false
       if (tab !== 'all' && i.class !== tab) return false
       if (q && !`${i.title}${i.code}${i.rationale}`.includes(q)) return false
       return true
@@ -41,46 +41,33 @@ export function Issues() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-xl font-semibold">校验 / 预警问题中心</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          三类问题分开列示，避免把所有东西都叫预警。数据质量表示「暂时没有足够证据做正式判断」；风险预警表示尚未违规但临近；合规问题表示已不满足正式要求。
-        </p>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        {TABS.map((t) => (
-          <Button
-            key={t.id}
-            kind={tab === t.id ? 'primary' : 'ghost'}
-            onClick={() => {
-              setTab(t.id)
-              setPage(1)
-            }}
-          >
-            {t.label} ({counts[t.id]})
-          </Button>
-        ))}
-        <input
-          className="input ml-auto"
-          placeholder="搜索问题/依据"
-          value={q}
-          onChange={(e) => {
-            setQ(e.target.value)
-            setPage(1)
-          }}
-        />
-      </div>
-      <Card className="overflow-auto p-0">
-        <table className="data">
+      <PageHeader title="问题中心" />
+      <Card className="data-workspace p-0">
+        <div className="workspace-toolbar">
+          <FocusTabs
+            label="问题类型"
+            value={tab}
+            onChange={(next) => { setTab(next as IssueClass | 'all'); setPage(1) }}
+            items={TABS.map((item) => ({
+              ...item,
+              count: counts[item.id],
+              tone: item.id === 'compliance' ? 'red' : item.id === 'risk' ? 'amber' : item.id === 'data_quality' ? 'blue' : undefined,
+            }))}
+          />
+          <SearchField
+            value={q}
+            onChange={(next) => { setQ(next); setPage(1) }}
+            label="搜索问题"
+            placeholder="搜索问题或判定依据"
+          />
+        </div>
+        <div className="table-scroll">
+        <table className="data" aria-label="待处理问题列表">
           <thead>
             <tr>
-              <th>编号</th>
               <th>问题</th>
-              <th>类别</th>
-              <th>严重程度</th>
-              <th>单位</th>
-              <th>人员</th>
-              <th>规则</th>
+              <th>类型 / 程度</th>
+              <th>涉及范围</th>
               <th>状态</th>
               <th></th>
             </tr>
@@ -91,15 +78,12 @@ export function Issues() {
               const rule = db.rules.find((r) => r.id === i.ruleId)
               return (
                 <tr key={i.id}>
-                  <td className="font-mono text-xs">{i.code}</td>
-                  <td className="font-medium">{i.title}</td>
+                  <td><div className="font-medium">{i.title}</div><div className="mt-1 font-mono text-[10px] text-slate-400">{i.code}</div></td>
                   <td>
                     <Badge tone={issueTone(i.class)}>{ISSUE_CLASS[i.class]}</Badge>
+                    <div className="mt-1 text-[11px] text-slate-400">{severity(i.severity)}</div>
                   </td>
-                  <td>{severity(i.severity)}</td>
-                  <td>{i.orgId ? orgPath(db, i.orgId) : '—'}</td>
-                  <td>{person ? `${person.name} ${person.employeeNo}` : '—'}</td>
-                  <td>{rule ? `${rule.code} v${i.ruleVersion ?? rule.version}` : '—'}</td>
+                  <td><div>{person ? `${person.name} ${person.employeeNo}` : '—'}</div><div className="mt-1 max-w-md truncate text-[11px] text-slate-400">{i.orgId ? orgPath(db, i.orgId) : '—'}</div>{rule ? <div className="mt-1 text-[10px] text-slate-400">{rule.code} v{i.ruleVersion ?? rule.version}</div> : null}</td>
                   <td>
                     <Badge tone={i.status === 'closed' ? 'green' : i.status === 'open' ? 'red' : 'amber'}>{ISSUE_STATUS[i.status]}</Badge>
                   </td>
@@ -109,8 +93,10 @@ export function Issues() {
                 </tr>
               )
             })}
+            {rows.length === 0 ? <tr><td colSpan={5}><Empty>当前视图共 0 个问题</Empty></td></tr> : null}
           </tbody>
         </table>
+        </div>
         <Pager page={page} total={rows.length} onPage={setPage} />
       </Card>
 

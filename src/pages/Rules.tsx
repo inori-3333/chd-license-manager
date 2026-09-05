@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { Badge, Button, Card, Modal } from '../components/ui'
+import { Badge, Button, Card, Empty, FocusTabs, Modal, PAGE_SIZE, PageHeader, Pager, SearchField } from '../components/ui'
 import {
   ackConflict,
   can,
@@ -30,11 +30,28 @@ const FIELDS: Array<{ id: Condition['field']; label: string }> = [
   { id: 'work_scope_start', label: '作业开始' },
 ]
 
+type RuleView = 'attention' | 'active' | 'draft' | 'all'
+
 export function Rules() {
   const db = useDb()
+  const rules = db.rules.slice().sort((a, b) => a.code.localeCompare(b.code) || b.version - a.version)
+  const needsAction = (rule: Rule) =>
+    (rule.status === 'pending_review' && can('approve_rule'))
+    || (rule.status === 'draft' && (can('submit_rule') || can('edit_rule')))
+  const attentionCount = rules.filter(needsAction).length
   const [edit, setEdit] = useState<Rule | null>(null)
   const [sim, setSim] = useState<SimulationReport | null>(null)
   const [msg, setMsg] = useState('')
+  const [view, setView] = useState<RuleView>(attentionCount ? 'attention' : 'active')
+  const [query, setQuery] = useState('')
+  const [page, setPage] = useState(1)
+  const visibleRules = rules.filter((rule) => {
+    if (view === 'attention' && !needsAction(rule)) return false
+    if (view === 'active' && rule.status !== 'active') return false
+    if (view === 'draft' && rule.status !== 'draft') return false
+    const keyword = query.trim().toLowerCase()
+    return !keyword || `${rule.code}${rule.name}${RULE_TYPE[rule.type]}${CERT_CAT[rule.certCategory]}`.toLowerCase().includes(keyword)
+  })
 
   function statusTone(s: string) {
     if (s === 'active') return 'green' as const
@@ -45,85 +62,74 @@ export function Rules() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-end justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">持证规则中心</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            专业部门维护草稿，HR 审核发布。已发布规则不可直接覆盖，必须新版本。冲突时阻止发布，不自动排优先级。
-          </p>
+      <PageHeader title="规则中心" action={can('edit_rule') ? <Button kind="primary" onClick={() => setEdit(newDraftRule())}>新建草稿</Button> : undefined} />
+      {msg ? <div role="status" className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">{msg}</div> : null}
+      <Card className="data-workspace p-0">
+        <div className="workspace-toolbar">
+          <FocusTabs
+            label="规则范围"
+            value={view}
+            onChange={(next) => { setView(next as RuleView); setPage(1) }}
+            items={[
+              { id: 'attention', label: '待我处理', count: attentionCount, tone: 'amber' },
+              { id: 'active', label: '生效中', count: rules.filter((rule) => rule.status === 'active').length, tone: 'teal' },
+              { id: 'draft', label: '草稿', count: rules.filter((rule) => rule.status === 'draft').length, tone: 'blue' },
+              { id: 'all', label: '全部', count: rules.length },
+            ]}
+          />
+          <SearchField
+            value={query}
+            onChange={(next) => { setQuery(next); setPage(1) }}
+            label="搜索规则"
+            placeholder="搜索规则名称或编码"
+          />
         </div>
-        <Button kind="primary" disabled={!can('edit_rule')} onClick={() => setEdit(newDraftRule())}>
-          新建草稿
-        </Button>
-      </div>
-      {msg ? <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">{msg}</div> : null}
-      <Card className="overflow-auto p-0">
-        <table className="data">
-          <thead>
-            <tr>
-              <th>编码</th>
-              <th>名称</th>
-              <th>类型</th>
-              <th>类别</th>
-              <th>版本</th>
-              <th>状态</th>
-              <th>生效</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {db.rules
-              .slice()
-              .sort((a, b) => a.code.localeCompare(b.code) || b.version - a.version)
-              .map((r) => (
-                <tr key={r.id}>
-                  <td>{r.code}</td>
-                  <td>
-                    <div className="font-medium">{r.name}</div>
-                    <div className="max-w-md text-[11px] text-slate-400">{explainCondition(r.condition)}</div>
-                  </td>
-                  <td>{RULE_TYPE[r.type]}</td>
-                  <td>{CERT_CAT[r.certCategory]}</td>
-                  <td>v{r.version}</td>
-                  <td>
-                    <Badge tone={statusTone(r.status)}>{RULE_STATUS[r.status]}</Badge>
-                  </td>
-                  <td>
-                    {r.effectiveFrom} ~ {r.effectiveTo ?? '长期'}
-                  </td>
-                  <td className="space-x-1">
-                    <Button onClick={() => setEdit({ ...r })}>查看</Button>
-                    {r.status === 'active' && can('edit_rule') ? (
-                      <Button
-                        onClick={() => {
-                          const n = { ...r, status: 'draft' as const }
-                          setEdit({ ...n, version: r.version, notes: '将另存为新版本' })
-                        }}
-                      >
-                        新版本
-                      </Button>
+
+        <div className="table-scroll">
+          <table className="data" aria-label="规则列表">
+            <thead>
+              <tr>
+                <th>规则</th>
+                <th>类型 / 类别</th>
+                <th>版本 / 状态</th>
+                <th>生效周期</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRules.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((rule) => (
+                <tr key={rule.id}>
+                  <td className="min-w-64"><div className="font-medium text-slate-800">{rule.name}</div><div className="mt-1 font-mono text-[10px] text-slate-400">{rule.code}</div></td>
+                  <td><div>{RULE_TYPE[rule.type]}</div><div className="mt-1 text-[11px] text-slate-400">{CERT_CAT[rule.certCategory]}</div></td>
+                  <td><div className="mb-1 text-[11px] text-slate-400">v{rule.version}</div><Badge tone={statusTone(rule.status)}>{RULE_STATUS[rule.status]}</Badge></td>
+                  <td>{rule.effectiveFrom} ~ {rule.effectiveTo ?? '长期'}</td>
+                  <td className="space-x-1 whitespace-nowrap">
+                    <Button onClick={() => setEdit({ ...rule })}>查看</Button>
+                    {rule.status === 'active' && can('edit_rule') ? (
+                      <Button onClick={() => setEdit({ ...rule, status: 'draft', notes: '将另存为新版本' })}>新版本</Button>
                     ) : null}
-                    {r.status === 'draft' && can('submit_rule') ? <Button onClick={() => submitRule(r.id)}>提交审核</Button> : null}
-                    {r.status === 'pending_review' && can('approve_rule') ? (
+                    {rule.status === 'draft' && can('submit_rule') ? <Button onClick={() => submitRule(rule.id)}>提交审核</Button> : null}
+                    {rule.status === 'pending_review' && can('approve_rule') ? (
                       <>
                         <Button
                           kind="primary"
                           onClick={() => {
-                            const res = reviewRule(r.id, true, '审核通过')
-                            if (!res.ok) setMsg(res.message + (res.conflicts ? '：' + res.conflicts.items.map((i) => i.reason).join('；') : ''))
+                            const result = reviewRule(rule.id, true, '审核通过')
+                            if (!result.ok) setMsg(result.message + (result.conflicts ? '：' + result.conflicts.items.map((item) => item.reason).join('；') : ''))
                             else setMsg('')
                           }}
-                        >
-                          通过
-                        </Button>
-                        <Button onClick={() => reviewRule(r.id, false, '请补充条件说明')}>驳回</Button>
+                        >通过</Button>
+                        <Button onClick={() => reviewRule(rule.id, false, '请补充条件说明')}>驳回</Button>
                       </>
                     ) : null}
                   </td>
                 </tr>
               ))}
-          </tbody>
-        </table>
+              {visibleRules.length === 0 ? <tr><td colSpan={5}><Empty>当前视图共 0 条规则</Empty></td></tr> : null}
+            </tbody>
+          </table>
+        </div>
+        <Pager page={page} total={visibleRules.length} onPage={setPage} />
       </Card>
 
       {edit ? (
@@ -149,7 +155,7 @@ export function Rules() {
       ) : null}
 
       {sim ? (
-        <Modal title="发布前模拟（不写入问题库）" onClose={() => setSim(null)}>
+        <Modal title="发布前模拟" onClose={() => setSim(null)}>
           <ul className="space-y-2 text-sm">
             <li>影响人员：{sim.affectedPeople}</li>
             <li>涉及单位：{sim.affectedOrgs}</li>
@@ -251,7 +257,7 @@ function RuleEditor({
       </div>
       <div>
         <div className="mb-1 flex items-center gap-2 text-slate-500">
-          适用条件（白名单字段，不执行脚本）
+          适用条件
           <select
             className="select"
             disabled={locked}
@@ -388,17 +394,17 @@ function RuleEditor({
         </div>
       ) : null}
       <L k="说明">
-        <textarea className="textarea" disabled={locked} value={rule.notes} onChange={(e) => onChange({ ...rule, notes: e.target.value })} />
+        <textarea className="textarea resize-none" disabled={locked} value={rule.notes} onChange={(e) => onChange({ ...rule, notes: e.target.value })} />
       </L>
       {c.conflicting ? (
         <div className="rounded border border-rose-200 bg-rose-50 p-3 text-rose-900">
-          <div className="font-semibold">发现潜在冲突，系统不自动裁决</div>
+          <div className="font-semibold">发现潜在冲突</div>
           {c.items.map((i) => (
             <div key={i.ruleId} className="text-xs">
               {i.ruleName}：{i.reason}
             </div>
           ))}
-          {!locked ? <Button onClick={onAck}>我已人工确认非冲突 / 仍要提交</Button> : null}
+          {!locked ? <Button onClick={onAck}>确认后继续提交</Button> : null}
         </div>
       ) : null}
       <div className="flex gap-2">

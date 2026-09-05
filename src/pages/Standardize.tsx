@@ -1,28 +1,26 @@
 import { useState } from 'react'
-import { Card, Badge, Button, Modal } from '../components/ui'
+import { Badge, Button, Card, Modal, PAGE_SIZE, PageHeader, Pager } from '../components/ui'
 import { can, confirmMapping, disableMapping, rejectMapping, useDb } from '../store'
 import { MAP_KIND } from '../format'
 
 export function Standardize() {
   const db = useDb()
   const [tab, setTab] = useState<'pending' | 'confirmed'>('pending')
+  const [page, setPage] = useState(1)
   const [noneId, setNoneId] = useState<string | null>(null)
   const pending = db.mappings.filter((m) => m.status === 'pending').sort((a, b) => b.usageCount - a.usageCount)
   const confirmed = db.mappings.filter((m) => m.status !== 'pending')
+  const current = tab === 'pending' ? pending : confirmed
+  const visible = current.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-xl font-semibold">名称标准化处理</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          算法只在受控标准库中排序候选，不得自动通过。自动通过的唯一依据：权威编码、标准名称完全一致、已确认历史映射。
-        </p>
-      </div>
+      <PageHeader title="名称标准化处理" meta={<><span>{pending.length} 项待处理</span><span>每页 {PAGE_SIZE} 项</span></>} />
       <div className="flex gap-2">
-        <Button kind={tab === 'pending' ? 'primary' : 'ghost'} onClick={() => setTab('pending')}>
+        <Button kind={tab === 'pending' ? 'primary' : 'ghost'} onClick={() => { setTab('pending'); setPage(1) }}>
           待处理名称 ({pending.length})
         </Button>
-        <Button kind={tab === 'confirmed' ? 'primary' : 'ghost'} onClick={() => setTab('confirmed')}>
+        <Button kind={tab === 'confirmed' ? 'primary' : 'ghost'} onClick={() => { setTab('confirmed'); setPage(1) }}>
           已确认映射库 ({confirmed.length})
         </Button>
       </div>
@@ -41,7 +39,7 @@ export function Standardize() {
               </tr>
             </thead>
             <tbody>
-              {pending.map((m) => (
+              {visible.map((m) => (
                 <tr key={m.id}>
                   <td>
                     <Badge tone="teal">{MAP_KIND[m.kind]}</Badge>
@@ -51,7 +49,7 @@ export function Standardize() {
                   <td>{m.usageCount}</td>
                   <td>
                     <div className="space-y-1">
-                      {m.candidates.length === 0 ? <span className="text-slate-400">无法匹配</span> : null}
+                      {m.candidates.length === 0 ? <span className="text-slate-400">待补充候选</span> : null}
                       {m.candidates.map((c) => (
                         <div key={c.standardId} className="flex items-center justify-between gap-2 rounded bg-slate-50 px-2 py-1">
                           <div>
@@ -73,13 +71,14 @@ export function Standardize() {
                   </td>
                   <td>
                     <Button disabled={!can('confirm_mapping')} onClick={() => setNoneId(m.id)}>
-                      都不正确
+                      保留待治理
                     </Button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          <Pager page={page} total={pending.length} onPage={setPage} />
         </Card>
       ) : (
         <Card className="overflow-auto p-0">
@@ -98,7 +97,7 @@ export function Standardize() {
               </tr>
             </thead>
             <tbody>
-              {confirmed.map((m) => (
+              {visible.map((m) => (
                 <tr key={m.id}>
                   <td>{m.originalName}</td>
                   <td>{m.standardName ?? '—'}</td>
@@ -121,12 +120,13 @@ export function Standardize() {
               ))}
             </tbody>
           </table>
+          <Pager page={page} total={confirmed.length} onPage={setPage} />
         </Card>
       )}
 
       {noneId ? (
-        <Modal title="候选都不正确" onClose={() => setNoneId(null)}>
-          <p className="mb-3 text-sm text-slate-600">不能强迫审核人在错误候选中选择。将保留待治理状态，等待标准库补充或人工另行指定。</p>
+        <Modal title="保留待治理" onClose={() => setNoneId(null)}>
+          <p className="mb-3 text-sm text-slate-600">后续可补充标准库或人工指定。</p>
           <Button
             kind="primary"
             onClick={() => {
@@ -134,7 +134,7 @@ export function Standardize() {
               setNoneId(null)
             }}
           >
-            记录「都不正确」
+            保留待治理
           </Button>
         </Modal>
       ) : null}

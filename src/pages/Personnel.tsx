@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Badge, Button, Card, Modal, Pager, PAGE_SIZE, judgeTone } from '../components/ui'
+import { Badge, Button, Card, Modal, Pager, PAGE_SIZE, PageHeader, ProgressiveSection, judgeTone } from '../components/ui'
 import { confirmWorkScope, currentUser, liveCalc, useDb, visibleOrgIds } from '../store'
 import { ITEM_STATUS, JUDGE } from '../format'
 import { assignmentsAt } from '../engine/calculate'
@@ -10,6 +10,7 @@ export function Personnel() {
   const calc = liveCalc(db)
   const scope = visibleOrgIds(db)
   const [q, setQ] = useState('')
+  const [filter, setFilter] = useState<'attention' | 'all' | 'compliant'>('attention')
   const [page, setPage] = useState(1)
   const [sel, setSel] = useState<string | null>(null)
   const rows = calc.personResults.filter((r) => {
@@ -19,6 +20,8 @@ export function Personnel() {
       const asg = db.assignments.find((a) => a.personId === p.id)
       if (!asg || !scope.has(asg.orgId)) return false
     }
+    if (filter === 'attention' && r.judgement === 'compliant') return false
+    if (filter === 'compliant' && r.judgement !== 'compliant') return false
     if (q && !`${p.name}${p.employeeNo}`.includes(q)) return false
     return true
   })
@@ -28,12 +31,10 @@ export function Personnel() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-end justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">人员持证详情</h1>
-          <p className="mt-1 text-sm text-slate-500">原始岗位/证书名称与标准值并存。判定依据可追溯到规则版本。</p>
-        </div>
-        <input
+      <PageHeader
+        title="人员持证详情"
+        meta={<><span>{rows.length} 人符合当前条件</span><span>判定依据可追溯至规则版本</span></>}
+        action={<input
           className="input"
           placeholder="搜索姓名/工号"
           value={q}
@@ -41,10 +42,15 @@ export function Personnel() {
             setQ(e.target.value)
             setPage(1)
           }}
-        />
+        />}
+      />
+      <div className="view-switcher" aria-label="人员范围">
+        <button className={filter === 'attention' ? 'active' : ''} onClick={() => { setFilter('attention'); setPage(1) }}>需要关注</button>
+        <button className={filter === 'all' ? 'active' : ''} onClick={() => { setFilter('all'); setPage(1) }}>全部人员</button>
+        <button className={filter === 'compliant' ? 'active' : ''} onClick={() => { setFilter('compliant'); setPage(1) }}>合规</button>
       </div>
       <Card className="overflow-auto p-0">
-        <table className="data">
+        <table className="data personnel-table">
           <thead>
             <tr>
               <th>工号</th>
@@ -104,8 +110,7 @@ function PersonDetail({ personId, onClose }: { personId: string; onClose: () => 
           <Badge tone={judgeTone(result.judgement)}>{JUDGE[result.judgement]}</Badge>
           <span className="text-slate-400">身份证 {person.idMasked}（脱敏）</span>
         </div>
-        <section>
-          <h4 className="mb-1 font-semibold">任职历史（原始值保留）</h4>
+        <ProgressiveSection title="任职历史" summary={`${asg.length} 条记录 · 原始值保留`}>
           <table className="data">
             <thead>
               <tr>
@@ -133,16 +138,16 @@ function PersonDetail({ personId, onClose }: { personId: string; onClose: () => 
               ))}
             </tbody>
           </table>
-        </section>
+        </ProgressiveSection>
         <section>
-          <h4 className="mb-1 font-semibold">作业/职责范围（不得由岗位或 AI 自动写成正式范围）</h4>
+          <h4 className="mb-1 font-semibold">作业 / 职责范围</h4>
           <ul className="mb-2 list-disc pl-5">
             {scopes.map((s) => (
               <li key={s.id}>
                 {db.workScopeTags.find((t) => t.id === s.tagId)?.name} · {s.confirmed ? `已确认（${s.confirmedBy}）` : '未确认'} · {s.startDate}
               </li>
             ))}
-            {scopes.length === 0 ? <li className="text-amber-700">缺失。系统不会猜测。</li> : null}
+            {scopes.length === 0 ? <li className="text-amber-700">待补充作业 / 职责范围</li> : null}
           </ul>
           {user.role === 'unit' || user.role === 'admin' || user.role === 'hr' ? (
             <div className="flex gap-2">
@@ -159,8 +164,7 @@ function PersonDetail({ personId, onClose }: { personId: string; onClose: () => 
             </div>
           ) : null}
         </section>
-        <section>
-          <h4 className="mb-1 font-semibold">持证记录</h4>
+        <ProgressiveSection title="持证记录" summary={`${holds.length} 张证书`}>
           <table className="data">
             <thead>
               <tr>
@@ -185,16 +189,15 @@ function PersonDetail({ personId, onClose }: { personId: string; onClose: () => 
               ))}
             </tbody>
           </table>
-        </section>
-        <section>
-          <h4 className="mb-1 font-semibold">应持证项与判定依据</h4>
-          {result.requiredItems.length === 0 ? <p className="text-slate-400">当前无强制应持证项（或规则不适用）。</p> : null}
+        </ProgressiveSection>
+        <ProgressiveSection title="应持证项与判定依据" summary={`${result.requiredItems.length} 个证项`} defaultOpen={result.judgement !== 'compliant'}>
+          {result.requiredItems.length === 0 ? <p className="text-slate-400">当前应持证项 0</p> : null}
           {result.requiredItems.map((i, idx) => (
             <div key={idx} className="mb-2 rounded-lg border border-slate-200 p-2">
               <div className="flex items-center justify-between">
                 <span>
                   {i.certificateName} · {i.ruleName} v{i.ruleVersion}
-                  {i.incentive ? '（激励，不记违规）' : ''}
+                  {i.incentive ? '（激励类）' : ''}
                 </span>
                 <Badge tone={i.status === 'satisfied' ? 'green' : i.status === 'unknown' || i.status === 'in_transition' ? 'amber' : 'red'}>
                   {ITEM_STATUS[i.status]}
@@ -218,9 +221,8 @@ function PersonDetail({ personId, onClose }: { personId: string; onClose: () => 
               </div>
             ))}
           </div>
-        </section>
+        </ProgressiveSection>
       </div>
     </Modal>
   )
 }
-

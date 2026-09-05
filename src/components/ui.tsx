@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react'
+import { useEffect, useId, useRef, type ReactNode } from 'react'
+import { ChevronDown, Search, X } from 'lucide-react'
 import { cls } from '../format'
 
 export function Badge({
@@ -44,11 +45,126 @@ export function Card({ children, className }: { children: ReactNode; className?:
   return <div className={cls('card', className)}>{children}</div>
 }
 
+export function PageHeader({
+  title,
+  action,
+  meta,
+}: {
+  title: string
+  action?: ReactNode
+  meta?: ReactNode
+}) {
+  return (
+    <header className="focus-header">
+      <div className="min-w-0">
+        <h1>{title}</h1>
+        {meta ? <div className="focus-header-meta">{meta}</div> : null}
+      </div>
+      {action ? <div className="focus-header-action">{action}</div> : null}
+    </header>
+  )
+}
+
+export function FocusTabs({
+  label,
+  value,
+  items,
+  onChange,
+}: {
+  label: string
+  value: string
+  items: Array<{ id: string; label: string; count?: number; tone?: 'blue' | 'red' | 'amber' | 'teal' | 'violet' }>
+  onChange: (id: string) => void
+}) {
+  return (
+    <div className="focus-tabs" role="group" aria-label={label}>
+      {items.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          className={value === item.id ? 'focus-tab active' : 'focus-tab'}
+          data-tone={item.tone}
+          aria-pressed={value === item.id}
+          onClick={() => onChange(item.id)}
+        >
+          <span>{item.label}</span>
+          {item.count != null ? <strong>{item.count}</strong> : null}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+export function SearchField({
+  value,
+  onChange,
+  label,
+  placeholder,
+}: {
+  value: string
+  onChange: (value: string) => void
+  label: string
+  placeholder: string
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  return (
+    <div className="search-field">
+      <Search size={15} aria-hidden="true" />
+      <input
+        ref={inputRef}
+        type="text"
+        aria-label={label}
+        placeholder={placeholder}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      {value ? (
+        <button
+          type="button"
+          aria-label="清空搜索"
+          onClick={() => {
+            onChange('')
+            inputRef.current?.focus()
+          }}
+        >
+          <X size={14} />
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+export function ProgressiveSection({
+  title,
+  summary,
+  children,
+  defaultOpen = false,
+}: {
+  title: string
+  summary?: string
+  children: ReactNode
+  defaultOpen?: boolean
+}) {
+  return (
+    <details className="progressive-section" open={defaultOpen || undefined}>
+      <summary>
+        <span>
+          <strong>{title}</strong>
+          {summary ? <small>{summary}</small> : null}
+        </span>
+        <ChevronDown size={17} aria-hidden="true" />
+      </summary>
+      <div className="progressive-section-body">{children}</div>
+    </details>
+  )
+}
+
 export function Kpi({
   label,
   value,
   hint,
-  accent = '#0d9488',
+  accent = '#3b82f6',
 }: {
   label: string
   value: string
@@ -75,13 +191,57 @@ export function Modal({
   onClose: () => void
   wide?: boolean
 }) {
+  const titleId = useId()
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const onCloseRef = useRef(onClose)
+
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
+
+  useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    dialogRef.current?.querySelector<HTMLElement>('button, input, select, textarea, [tabindex]:not([tabindex="-1"])')?.focus()
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onCloseRef.current()
+        return
+      }
+      if (event.key !== 'Tab' || !dialogRef.current) return
+      const focusable = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'),
+      )
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      document.body.style.overflow = previousOverflow
+      previousFocus?.focus()
+    }
+  }, [])
+
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className={cls('modal p-5', wide && 'max-w-4xl')} onClick={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+      <div ref={dialogRef} className={cls('modal p-5', wide && 'max-w-4xl')} role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-base font-semibold">{title}</h3>
-          <button className="btn btn-ghost" onClick={onClose}>
-            关闭
+          <h3 id={titleId} className="text-base font-semibold">{title}</h3>
+          <button className="icon-button" aria-label="关闭" onClick={onClose}>
+            <X size={16} />
           </button>
         </div>
         {children}
@@ -116,7 +276,7 @@ export function issueTone(c: string): 'red' | 'amber' | 'blue' {
   return 'blue'
 }
 
-export const PAGE_SIZE = 40
+export const PAGE_SIZE = 12
 
 export function Pager({
   page,
@@ -132,7 +292,7 @@ export function Pager({
   const pages = Math.max(1, Math.ceil(total / pageSize))
   if (total <= pageSize) return <div className="px-3 py-2 text-xs text-slate-400">共 {total} 条</div>
   return (
-    <div className="flex items-center justify-end gap-2 px-3 py-2 text-xs text-slate-500">
+    <div className="pager flex items-center justify-end gap-2 px-3 py-2 text-xs text-slate-500">
       <span>
         共 {total} 条 · {page}/{pages}
       </span>

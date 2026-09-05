@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { Card, Button, Badge, Modal } from '../components/ui'
+import { Badge, Button, Card, Modal, PageHeader, ProgressiveSection } from '../components/ui'
 import { addPersonManual, can, importRows, useDb } from '../store'
 import { detectKind, normalizeHeaderMap, type RawRow } from '../engine/validate'
 
@@ -55,7 +55,7 @@ export function DataImport() {
       })
     }
     if (!rows.length) {
-      setMsg('未识别到含「工号」的工作表，请使用模板。')
+      setMsg('请选择包含「工号」的工作表，或使用导入模板。')
       return
     }
     const batch = importRows(rows, file.name)
@@ -64,17 +64,12 @@ export function DataImport() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-xl font-semibold">数据导入</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          导入成功 ≠ 标准化完成 ≠ 可参与正式统计。硬校验只拦非法数据；非标准名称可以进入待治理区。
-        </p>
-      </div>
+      <PageHeader title="数据导入" meta={<span>{db.batches.length} 个导入批次</span>} />
 
       <Card className="p-4">
         <div className="flex flex-wrap items-center gap-2">
           <Button kind="primary" disabled={!can('import')} onClick={downloadTemplate}>
-            下载 Excel 模板（含非法行示例）
+            下载 Excel 模板（含校验示例）
           </Button>
           <label className={`btn btn-ghost ${!can('import') ? 'opacity-40' : ''}`}>
             上传 Excel / CSV
@@ -93,51 +88,14 @@ export function DataImport() {
           <Button onClick={() => setShowForm(true)}>网页单条维护</Button>
         </div>
         {msg ? <div className="mt-3 rounded-lg bg-teal-50 px-3 py-2 text-sm text-teal-900">{msg}</div> : null}
-        <p className="mt-3 text-xs text-slate-400">未来 API/人资对接预留在接入层，本 MVP 以 Excel 与页面维护演示四段式导入。</p>
       </Card>
 
-      {db.batches.map((b) => (
-        <Card key={b.id} className="p-4">
-          <div className="mb-2 flex items-center justify-between">
-            <div>
-              <div className="font-semibold">{b.filename}</div>
-              <div className="text-xs text-slate-400">
-                {b.at.replace('T', ' ').slice(0, 19)} · {b.by}
-              </div>
-            </div>
-            <Badge tone={b.rejected ? 'amber' : 'green'}>{b.notes}</Badge>
-          </div>
-          <div className="grid grid-cols-5 gap-2 text-center text-sm">
-            <Stat k="导入记录" v={b.total} />
-            <Stat k="成功接收" v={b.accepted} />
-            <Stat k="已标准化" v={b.standardized} />
-            <Stat k="待治理" v={b.pending} />
-            <Stat k="导入失败" v={b.rejected} />
-          </div>
-          {b.errors.length ? (
-            <table className="data mt-3">
-              <thead>
-                <tr>
-                  <th>行</th>
-                  <th>表</th>
-                  <th>字段</th>
-                  <th>原因</th>
-                </tr>
-              </thead>
-              <tbody>
-                {b.errors.map((e, i) => (
-                  <tr key={i}>
-                    <td>{e.row}</td>
-                    <td>{e.sheet}</td>
-                    <td>{e.field}</td>
-                    <td>{e.message}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : null}
-        </Card>
-      ))}
+      {db.batches.slice(0, 1).map((b) => <BatchCard key={b.id} b={b} />)}
+      {db.batches.length > 1 ? (
+        <ProgressiveSection title="历史导入批次" summary={`${db.batches.length - 1} 个较早批次`}>
+          <div className="space-y-3">{db.batches.slice(1).map((b) => <BatchCard key={b.id} b={b} />)}</div>
+        </ProgressiveSection>
+      ) : null}
 
       {showForm ? (
         <Modal title="单条维护人员" onClose={() => setShowForm(false)}>
@@ -171,12 +129,22 @@ export function DataImport() {
                 setShowForm(false)
               }}
             >
-              保存（原始值保留，不覆盖）
+              保存原始数据
             </Button>
           </div>
         </Modal>
       ) : null}
     </div>
+  )
+}
+
+function BatchCard({ b }: { b: ReturnType<typeof useDb>['batches'][number] }) {
+  return (
+    <Card className="p-4">
+      <div className="mb-2 flex items-center justify-between gap-3"><div><div className="font-semibold">{b.filename}</div><div className="text-xs text-slate-400">{b.at.replace('T', ' ').slice(0, 19)} · {b.by}</div></div><Badge tone={b.rejected ? 'amber' : 'green'}>{b.notes}</Badge></div>
+      <div className="grid grid-cols-2 gap-2 text-center text-sm sm:grid-cols-5"><Stat k="导入记录" v={b.total} /><Stat k="成功接收" v={b.accepted} /><Stat k="已标准化" v={b.standardized} /><Stat k="待治理" v={b.pending} /><Stat k="导入失败" v={b.rejected} /></div>
+      {b.errors.length ? <ProgressiveSection title="查看失败明细" summary={`${b.errors.length} 条`}><table className="data"><thead><tr><th>行</th><th>表</th><th>字段</th><th>原因</th></tr></thead><tbody>{b.errors.map((e, i) => <tr key={i}><td>{e.row}</td><td>{e.sheet}</td><td>{e.field}</td><td>{e.message}</td></tr>)}</tbody></table></ProgressiveSection> : null}
+    </Card>
   )
 }
 

@@ -1,0 +1,19 @@
+{
+  "profile": "product-admin",
+  "sourceRoots": ["src"],
+  "locale": "zh-CN",
+  "canonicalMap": "UX-CONTRACT.md",
+  "requiredCapabilities": ["Select/Listbox", "Date", "Scrollbar", "CRUD"],
+  "ownership": {
+    "Select/Listbox": "native",
+    "Date": "native"
+  },
+  "requiredCommands": ["unit", "build"],
+  "commands": {
+    "unit": "npm test",
+    "build": "npm run build"
+  },
+  "evidence": {
+    "failurePaths": "src/pages/Rules.tsx"
+  }
+}

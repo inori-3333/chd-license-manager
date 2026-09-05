@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Badge, Card, Pager, PAGE_SIZE, judgeTone } from '../components/ui'
+import { Badge, Card, Pager, PAGE_SIZE, PageHeader, judgeTone } from '../components/ui'
 import { liveCalc, useDb } from '../store'
 import { CERT_CAT, ISSUE_CLASS, ISSUE_STATUS, JUDGE, pct } from '../format'
 import { orgPath } from '../engine/org'
@@ -16,6 +16,9 @@ const TABS = [
   '整改闭环',
   '审计日志',
 ] as const
+
+const PRIMARY_TABS: Array<(typeof TABS)[number]> = ['单位综合', '应持未持', '临期复审']
+const SECONDARY_TABS: Array<(typeof TABS)[number]> = ['证书情况', '岗位匹配', '阶段目标', '数据质量', '整改闭环', '审计日志']
 
 export function Reports() {
   const db = useDb()
@@ -88,25 +91,16 @@ export function Reports() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-xl font-semibold">统计报表与追溯</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          正式考核以确认后的统计快照为依据；当前页按统计时点 {db.asOfDate} 即时重算，便于核查。
-        </p>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {TABS.map((t) => (
-          <button
-            key={t}
-            className={`btn ${tab === t ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => {
-              setTab(t)
-              setPage(1)
-            }}
-          >
-            {t}
-          </button>
-        ))}
+      <PageHeader title="统计报表与追溯" meta={<><span>统计时点 {db.asOfDate}</span><span>每页 {PAGE_SIZE} 条</span></>} />
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="view-switcher">
+          {PRIMARY_TABS.map((t) => <button key={t} className={tab === t ? 'active' : ''} onClick={() => { setTab(t); setPage(1) }}>{t}</button>)}
+        </div>
+        <select className="select" aria-label="更多报表" value={SECONDARY_TABS.includes(tab) ? tab : ''} onChange={(e) => { if (e.target.value) setTab(e.target.value as (typeof TABS)[number]); setPage(1) }}>
+          <option value="">更多报表…</option>
+          {SECONDARY_TABS.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <span className="text-xs text-slate-400">当前：{tab}</span>
       </div>
 
       {tab === '单位综合' ? (
@@ -115,36 +109,25 @@ export function Reports() {
             <thead>
               <tr>
                 <th>单位</th>
-                <th>应纳管</th>
-                <th>可判定</th>
-                <th>合规</th>
-                <th>人员合规率</th>
-                <th>应持证项</th>
-                <th>已完成证项</th>
-                <th>证项完成率</th>
+                <th>人员合规</th>
+                <th>证项完成</th>
                 <th>覆盖率</th>
-                <th>合规问题</th>
-                <th>风险预警</th>
+                <th>待关注</th>
               </tr>
             </thead>
             <tbody>
-              {calc.unitStats.map((u) => (
+              {slice(calc.unitStats).map((u) => (
                 <tr key={u.orgId}>
                   <td>{u.orgName}</td>
-                  <td>{u.managed}</td>
-                  <td>{u.decidable}</td>
-                  <td>{u.compliant}</td>
-                  <td>{pct(u.personRate)}</td>
-                  <td>{u.requiredItems}</td>
-                  <td>{u.satisfiedItems}</td>
-                  <td>{pct(u.itemRate)}</td>
+                  <td><div className="font-medium">{pct(u.personRate)}</div><div className="text-[11px] text-slate-400">{u.compliant} / {u.decidable} 可判定</div></td>
+                  <td><div className="font-medium">{pct(u.itemRate)}</div><div className="text-[11px] text-slate-400">{u.satisfiedItems} / {u.requiredItems} 证项</div></td>
                   <td>{pct(u.coverage)}</td>
-                  <td>{u.complianceIssues}</td>
-                  <td>{u.riskIssues}</td>
+                  <td><Badge tone={u.complianceIssues ? 'red' : 'green'}>{u.complianceIssues} 合规</Badge><div className="mt-1 text-[11px] text-slate-400">{u.riskIssues} 风险</div></td>
                 </tr>
               ))}
             </tbody>
           </table>
+          <Pager page={page} total={calc.unitStats.length} onPage={setPage} />
         </Card>
       ) : null}
 

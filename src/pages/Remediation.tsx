@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Badge, Button, Card, Modal, issueTone } from '../components/ui'
+import { Badge, Button, Card, Modal, PageHeader, ProgressiveSection, issueTone } from '../components/ui'
 import {
   assignReviewer,
   can,
@@ -37,14 +37,9 @@ export function Remediation() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-xl font-semibold">整改闭环</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          基层单位不得自行销项。流程：待整改 → 整改中 → 待复核 → 指定复核人通过后销项。销项后重新计算，校验问题是否真正消除。
-        </p>
-      </div>
-      <div className="grid gap-3 xl:grid-cols-5">
-        {COLS.map((col) => {
+      <PageHeader title="整改闭环" meta={<><span>{issues.filter((i) => i.status !== 'closed').length} 项处理中</span><span>{issues.filter((i) => i.status === 'pending_review').length} 项待复核</span></>} />
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {COLS.filter((col) => col.id !== 'closed').map((col) => {
           const list = issues.filter((i) => i.status === col.id)
           return (
             <Card key={col.id} className="p-3">
@@ -69,12 +64,18 @@ export function Remediation() {
                     </div>
                   </button>
                 ))}
-                {list.length === 0 ? <div className="py-6 text-center text-xs text-slate-400">无</div> : null}
+                {list.length === 0 ? <div className="py-6 text-center text-xs text-slate-400">0 项</div> : null}
               </div>
             </Card>
           )
         })}
       </div>
+
+      <ProgressiveSection title="已销项" summary={`${issues.filter((i) => i.status === 'closed').length} 项历史记录`}>
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          {issues.filter((i) => i.status === 'closed').map((i) => <button key={i.id} className="attention-item text-left" onClick={() => setSel(i)}><span>{i.title}<small>{i.code}</small></span><Badge tone="green">已销项</Badge></button>)}
+        </div>
+      </ProgressiveSection>
 
       {sel ? (
         <Modal wide title={`${sel.code} · ${ISSUE_STATUS[sel.status]}`} onClose={() => setSel(null)}>
@@ -93,14 +94,14 @@ export function Remediation() {
                       <div>{r.comment}</div>
                     </li>
                   ))}
-                {db.remediations.filter((r) => r.issueId === sel.id).length === 0 ? <li className="text-slate-400">尚无记录</li> : null}
+                {db.remediations.filter((r) => r.issueId === sel.id).length === 0 ? <li className="text-slate-400">整改记录 0</li> : null}
               </ul>
             </div>
-            <textarea className="textarea" placeholder="处理意见 / 整改说明" value={comment} onChange={(e) => setComment(e.target.value)} />
+            <textarea className="textarea resize-none" placeholder="处理意见 / 整改说明" value={comment} onChange={(e) => setComment(e.target.value)} />
 
             {user.role === 'unit' && (sel.status === 'open' || sel.status === 'remediating' || sel.status === 'resolved_pending_close') ? (
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
-                当前角色是基层单位管理员，可以整改和提交复核，但不能销项。
+                当前角色可完成整改与提交复核；销项由指定复核人确认。
               </div>
             ) : null}
 
@@ -171,7 +172,7 @@ export function Remediation() {
                 </>
               ) : null}
               {!can('review_issue') && !can('remediate') && !can('assign_reviewer') ? (
-                <span className="text-slate-400">当前角色仅可查看。</span>
+                <span className="text-slate-400">查看模式</span>
               ) : null}
             </div>
           </div>

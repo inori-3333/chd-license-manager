@@ -1,5 +1,6 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Card, Badge, SectionTitle, judgeTone } from '../components/ui'
+import { Badge, Card, PageHeader, ProgressiveSection, SectionTitle, judgeTone } from '../components/ui'
 import { currentUser, liveCalc, useDb, visibleOrgIds } from '../store'
 import { ISSUE_CLASS, ISSUE_STATUS, JUDGE, pct } from '../format'
 import { orgPath } from '../engine/org'
@@ -9,6 +10,7 @@ export function Workbench() {
   const calc = liveCalc(db)
   const scope = visibleOrgIds(db)
   const user = currentUser(db)
+  const [view, setView] = useState<'issues' | 'people'>('issues')
   const inScope = (orgId?: string, personId?: string) => {
     if (!scope) return true
     if (orgId && scope.has(orgId)) return true
@@ -33,39 +35,30 @@ export function Workbench() {
     { k: '待提交复核', n: issues.filter((i) => i.status === 'remediating').length, to: '/remediation' },
     { k: '被驳回/待销项', n: issues.filter((i) => i.status === 'resolved_pending_close').length, to: '/remediation' },
   ]
+  const activeTodo = todo.filter((item) => item.n > 0).sort((a, b) => b.n - a.n)
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-xl font-semibold">基层单位工作台</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          回答「我现在需要处理什么」。当前身份：{user.name}（{user.title}）
-          {user.orgScopeId ? '，数据范围已限制为本单位。' : '，可查看全公司。'}
-        </p>
+      <PageHeader
+        title="基层单位工作台"
+        meta={<><span>{user.name} · {user.title}</span><span>{activeTodo.length} 类待办</span></>}
+      />
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {activeTodo.slice(0, 4).map((t) => <Link key={t.k} to={t.to} className="attention-item card"><span>{t.k}</span><strong>{t.n}</strong></Link>)}
       </div>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
-        {todo.map((t) => (
-          <Link key={t.k} to={t.to} className="card p-3 hover:border-teal-300">
-            <div className="text-xs text-slate-500">{t.k}</div>
-            <div className="text-2xl font-semibold">{t.n}</div>
-          </Link>
-        ))}
-      </div>
+      <dl className="metric-strip">
+        <div><dt>应纳管</dt><dd>{('managed' in unit ? unit.managed : calc.stats.managed) as number}</dd></div>
+        <div><dt>人员合规率</dt><dd>{pct('personRate' in unit ? unit.personRate : calc.stats.personRate)}</dd></div>
+        <div><dt>证项完成率</dt><dd>{pct('itemRate' in unit ? unit.itemRate : calc.stats.itemRate)}</dd></div>
+        <div><dt>统计覆盖率</dt><dd>{pct('coverage' in unit ? unit.coverage : calc.stats.coverage)}</dd></div>
+      </dl>
 
       <Card className="p-4">
-        <SectionTitle>本单位持证统计</SectionTitle>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <div>应纳管 {('managed' in unit ? unit.managed : calc.stats.managed) as number}</div>
-          <div>人员合规率 {pct('personRate' in unit ? unit.personRate : calc.stats.personRate)}</div>
-          <div>证项完成率 {pct('itemRate' in unit ? unit.itemRate : calc.stats.itemRate)}</div>
-          <div>覆盖率 {pct('coverage' in unit ? unit.coverage : calc.stats.coverage)}</div>
-        </div>
-      </Card>
-
-      <div className="grid gap-4 xl:grid-cols-2">
+        <SectionTitle extra={<div className="view-switcher"><button className={view === 'issues' ? 'active' : ''} onClick={() => setView('issues')}>最新问题</button><button className={view === 'people' ? 'active' : ''} onClick={() => setView('people')}>人员判定</button></div>}>处理线索</SectionTitle>
+        {view === 'issues' ? (
         <Card className="p-4">
-          <SectionTitle>最新问题</SectionTitle>
           <table className="data">
             <thead>
               <tr>
@@ -90,8 +83,8 @@ export function Workbench() {
             </tbody>
           </table>
         </Card>
+        ) : (
         <Card className="p-4">
-          <SectionTitle>人员判定（本范围）</SectionTitle>
           <table className="data">
             <thead>
               <tr>
@@ -121,7 +114,16 @@ export function Workbench() {
             </tbody>
           </table>
         </Card>
-      </div>
+        )}
+      </Card>
+
+      {activeTodo.length > 4 ? (
+        <ProgressiveSection title="其他待办" summary={`${activeTodo.length - 4} 类低优先事项`}>
+          <div className="grid gap-3 md:grid-cols-3">
+            {activeTodo.slice(4).map((t) => <Link key={t.k} to={t.to} className="attention-item"><span>{t.k}</span><strong>{t.n}</strong></Link>)}
+          </div>
+        </ProgressiveSection>
+      ) : null}
     </div>
   )
 }
